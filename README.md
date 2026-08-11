@@ -29,7 +29,7 @@ TANgle автоматически собирает единый M3U-плейли
 ## Быстрый старт
 
 ```bash
-git clone https://github.com/tanweber/TANgle-iptv-checker.git
+git clone https://github.com/shadalik/TANgle-iptv-checker.git
 cd TANgle-iptv-checker
 docker compose up -d
 ```
