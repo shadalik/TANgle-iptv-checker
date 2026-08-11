@@ -1,4 +1,3 @@
-```python
 #!/usr/bin/env python3
 
 import gzip
@@ -1659,4 +1658,3 @@ def update_epg():
     )
 
     return merged_count
-```
