@@ -112,9 +112,12 @@
         .response-time.medium { color: var(--yellow); }
         .response-time.slow { color: var(--red); }
         .search-bar { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
-        .search-bar input, .search-bar select { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; }
-        .search-bar input { flex: 1; min-width: 180px; }
+        .search-bar input:not([type="checkbox"]), .search-bar select { background: var(--bg-input); border: 1px solid var(--border); color: var(--text); padding: 7px 10px; border-radius: 6px; font-size: 13px; }
+        .search-bar input:not([type="checkbox"]) { flex: 1; min-width: 180px; }
         .search-bar select { min-width: 130px; }
+        .filter-toggles { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin: -6px 0 14px; }
+        .filter-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+        .filter-toggle input[type="checkbox"] { width: 16px; height: 16px; margin: 0; padding: 0; flex: 0 0 auto; accent-color: var(--btn-bg); }
         .modal-overlay { display: none; position: fixed; inset: 0; background: #00000080; z-index: 100; justify-content: center; align-items: center; }
         .modal-overlay.show { display: flex; }
         .modal { background: var(--bg-card); border: 1px solid var(--border); border-radius: 12px; padding: 24px; width: 450px; max-width: 90vw; }
@@ -140,6 +143,11 @@
         .table-scroll table { min-width: 100%; }
         .table-scroll th { position: sticky; top: 0; z-index: 1; }
         .url-cell { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-muted); }
+        .table-fit { table-layout: fixed; }
+        .table-fit th, .table-fit td { overflow: hidden; text-overflow: ellipsis; }
+        .table-fit .name-cell, .table-fit .group-cell, .table-fit .source-cell,
+        .table-fit .url-cell, .table-fit .status-cell { white-space: nowrap; }
+        .table-fit .group-cell .group-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; display: inline-block; vertical-align: bottom; }
         .group-badge { background: var(--btn-secondary-bg); border: 1px solid var(--border); padding: 2px 7px; border-radius: 10px; font-size: 11px; white-space: nowrap; }
         .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
         .settings-card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 18px; }
@@ -174,7 +182,8 @@
             .panel-header { flex-wrap: wrap; gap: 8px; }
             .panel-header h2 { font-size: 15px; }
             .search-bar { flex-direction: column; }
-            .search-bar input, .search-bar select { min-width: auto; width: 100%; }
+            .search-bar input:not([type="checkbox"]), .search-bar select { min-width: auto; width: 100%; }
+            .filter-toggles { gap: 10px; margin: -4px 0 12px; }
             .table-scroll { max-height: 50vh; overflow: auto; }
             .table-scroll table { min-width: 700px; }
             th, td { padding: 6px 8px; font-size: 12px; }
@@ -207,10 +216,12 @@
             <div class="header-left">
                 <h1>TANgle</h1>
                 <div class="nav">
-                    <button class="active" onclick="showPanel('channels', this)" data-t="nav_channels">Каналы</button>
-                    <button onclick="showPanel('sources', this)" data-t="nav_sources">Источники</button>
-                    <button onclick="showPanel('settings', this)" data-t="nav_settings">Настройки</button>
-                    <button onclick="showPanel('access', this)" data-t="nav_access">Подключения</button>
+                    <button class="active" id="nav-channels" onclick="showPanel('channels', this)" data-t="nav_channels">Каналы</button>
+                    <button id="nav-groups" onclick="showPanel('groups', this)" data-t="nav_groups">Группы</button>
+                    <button id="nav-duplicates" onclick="showPanel('duplicates', this)" data-t="nav_duplicates">Дубли</button>
+                    <button id="nav-sources" onclick="showPanel('sources', this)" data-t="nav_sources">Источники</button>
+                    <button id="nav-settings" onclick="showPanel('settings', this)" data-t="nav_settings">Настройки</button>
+                    <button id="nav-access" onclick="showPanel('access', this)" data-t="nav_access">Подключения</button>
                 </div>
             </div>
             <div class="header-right">
@@ -245,22 +256,54 @@
                 </div>
             </div>
             <div class="search-bar" id="ch-filters" style="display:none;">
-                <input type="text" id="ch-search" data-t-placeholder="search_channels" placeholder="Поиск каналов..." oninput="renderChannels()">
+                <input type="text" id="ch-search" data-t-placeholder="search_channels" placeholder="Поиск каналов..." oninput="chSearchChanged()">
                 <select id="ch-filter" onchange="renderChannels()">
                     <option value="all" data-t="filter_all">Все</option>
+                    <option value="duplicates" data-t="filter_duplicates">Дубли</option>
                     <option value="alive" data-t="filter_alive">Живые</option>
                     <option value="fast" data-t="filter_fast">Быстрые (&lt;1с)</option>
                     <option value="medium" data-t="filter_medium">Средние (1-3с)</option>
                     <option value="slow" data-t="filter_slow">Медленные (&gt;3с)</option>
                     <option value="dead" data-t="filter_dead">Мёртвые</option>
+                    <option value="disabled" data-t="filter_disabled">Отключённые</option>
                     <option value="unchecked" data-t="filter_unchecked">Не проверены</option>
                 </select>
                 <select id="ch-group-filter" onchange="renderChannels()"><option value="" data-t="all_groups">Все группы</option></select>
                 <select id="ch-source-filter" onchange="renderChannels()"><option value="" data-t="all_sources">Все источники</option></select>
             </div>
-            <div class="table-scroll">
-                <table>
+            <div id="ch-toggles" class="filter-toggles" style="display:none;">
+                <label class="filter-toggle">
+                    <input type="checkbox" id="ch-hide-dups" checked onchange="onHideDupsChange()">
+                    <span data-t="filter_hide_dups">Скрывать дубли</span>
+                </label>
+                <label class="filter-toggle">
+                    <input type="checkbox" id="ch-hide-disabled" checked onchange="onHideDisabledChange()">
+                    <span data-t="filter_hide_disabled">Скрывать отключённые</span>
+                </label>
+            </div>
+            <div id="ch-bulk" style="display:none;margin-bottom:8px;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span id="ch-selected-count" style="font-size:13px;color:var(--text-muted);"></span>
+                <input type="text" id="ch-bulk-group" list="group-datalist" data-t-placeholder="bulk_group_placeholder" placeholder="Группа..." style="background:var(--bg-input);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:6px;font-size:13px;min-width:180px;">
+                <datalist id="group-datalist"></datalist>
+                <button class="btn btn-small" onclick="bulkAssignGroup()" data-t="bulk_assign">Назначить группу</button>
+                <button class="btn btn-secondary btn-small" onclick="bulkResetOverrides()" data-t="bulk_reset">Сбросить правки</button>
+                <button class="btn btn-secondary btn-small" onclick="clearSelection()">✕</button>
+            </div>
+            <div class="table-scroll" id="ch-table-scroll" onscroll="onChannelsScroll()">
+                <table id="channels-table" class="table-fit">
+                    <colgroup>
+                        <col style="width:34px;">
+                        <col style="width:100px;">
+                        <col>
+                        <col style="width:150px;">
+                        <col style="width:100px;">
+                        <col style="width:70px;">
+                        <col style="width:80px;">
+                        <col style="width:130px;">
+                        <col style="width:170px;">
+                    </colgroup>
                     <thead><tr>
+                        <th><input type="checkbox" id="ch-select-all" onchange="toggleSelectAll(this.checked)" title="Выбрать все"></th>
                         <th onclick="sortChannels('status')"><span data-t="col_status">Статус</span> <span class="sort-arrow">▲</span></th>
                         <th onclick="sortChannels('name')"><span data-t="col_name">Название</span> <span class="sort-arrow">▲</span></th>
                         <th onclick="sortChannels('group')"><span data-t="col_group">Группа</span> <span class="sort-arrow">▲</span></th>
@@ -269,12 +312,91 @@
                         <th onclick="sortChannels('availability')"><span data-t="col_availability">Доступность</span> <span class="sort-arrow">▲</span></th>
                         <th onclick="sortChannels('last_check')"><span data-t="col_last_check">Проверен</span> <span class="sort-arrow">▲</span></th>
                         <th onclick="sortChannels('url')"><span data-t="col_url">URL</span> <span class="sort-arrow">▲</span></th>
-                        <th data-t="col_actions">Действия</th>
                     </tr></thead>
                     <tbody id="all-channels"></tbody>
                 </table>
             </div>
             <div style="margin-top:10px;font-size:12px;color:var(--text-muted);" id="channels-count"></div>
+        </div>
+
+        <div id="panel-groups" class="panel">
+            <div class="panel-header">
+                <h2 data-t="nav_groups">Группы</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-secondary btn-small" onclick="rebuildPlaylist()" data-t="btn_rebuild">Пересобрать плейлист</button>
+                    <button class="btn btn-secondary btn-small" onclick="resetAllOverridesUI()" data-t="group_reset_all">Сбросить все правки</button>
+                    <button class="btn btn-secondary btn-small" onclick="loadGroupsPanel()" data-t="btn_refresh">Обновить</button>
+                </div>
+            </div>
+            <div id="groups-overrides-info" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
+            <h3 style="font-size:14px;margin:0 0 8px;" data-t="groups_suggested">Похожие группы</h3>
+            <div id="groups-suggestions" style="margin-bottom:20px;"></div>
+            <h3 style="font-size:14px;margin:0 0 8px;" data-t="groups_all">Все группы</h3>
+            <div class="search-bar" style="margin-bottom:8px;">
+                <input type="text" id="grp-search" data-t-placeholder="search_groups" placeholder="Поиск групп..." oninput="grpSearchChanged()">
+                <span id="grp-count" style="font-size:12px;color:var(--text-muted);align-self:center;white-space:nowrap;"></span>
+            </div>
+            <div id="grp-bulk" style="display:none;margin-bottom:8px;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span id="grp-selected-count" style="font-size:13px;color:var(--text-muted);"></span>
+                <button class="btn btn-small" onclick="bulkExcludeGroups(true)" data-t="btn_exclude_selected">Исключить выбранные</button>
+                <button class="btn btn-secondary btn-small" onclick="bulkExcludeGroups(false)" data-t="btn_include_selected">Вернуть выбранные</button>
+                <button class="btn btn-secondary btn-small" onclick="bulkResetGroups()" data-t="btn_reset_selected">Сбросить ручные правки</button>
+                <button class="btn btn-secondary btn-small" onclick="clearGroupSelection()">✕</button>
+            </div>
+            <div class="table-scroll">
+                <table id="groups-table">
+                    <thead><tr>
+                        <th style="width:34px;"><input type="checkbox" id="grp-select-all" onchange="toggleGroupSelectAll(this.checked)" title="Выбрать все"></th>
+                        <th onclick="sortGroups('name')"><span data-t="col_group">Группа</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortGroups('channels')"><span data-t="col_channels_count">Каналов</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortGroups('alive')"><span data-t="col_alive_count">Живых</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortGroups('in_playlist')"><span data-t="col_in_playlist">В плейлисте</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortGroups('excluded')"><span data-t="col_listed">В списке</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortGroups('manual')"><span data-t="col_manual">Ручных</span> <span class="sort-arrow">▲</span></th>
+                        <th data-t="col_actions">Действия</th>
+                    </tr></thead>
+                    <tbody id="groups-list"></tbody>
+                </table>
+            </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:6px;" data-t="group_exclude_hint">Исключённая группа не попадает в плейлист и ТВ-программу; её каналы выключаются, новые — тоже.</div>
+            <h3 style="font-size:14px;margin:20px 0 8px;" data-t="groups_aliases">Запомненные объединения</h3>
+            <div class="table-scroll">
+                <table id="merges-table">
+                    <thead><tr>
+                        <th onclick="sortMerges('canonical')"><span data-t="merge_target">Куда</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortMerges('sources')"><span data-t="merge_sources">Откуда</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortMerges('channels')"><span data-t="col_channels_count">Каналов</span> <span class="sort-arrow">▲</span></th>
+                        <th onclick="sortMerges('created')"><span data-t="col_created">Создано</span> <span class="sort-arrow">▲</span></th>
+                        <th data-t="col_actions">Действия</th>
+                    </tr></thead>
+                    <tbody id="groups-merges"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div id="panel-duplicates" class="panel">
+            <div class="panel-header">
+                <h2 data-t="nav_duplicates">Дубли</h2>
+                <div style="display:flex;gap:8px;">
+                    <button class="btn btn-secondary btn-small" onclick="dupAutoUI()" data-t="dup_auto">Автоотсев</button>
+                    <button class="btn btn-secondary btn-small" onclick="dupUndoAutoUI()" data-t="dup_undo_auto">Отменить автоотсев</button>
+                </div>
+            </div>
+            <div id="dup-info" style="font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
+            <div class="search-bar">
+                <input type="text" id="dup-search" data-t-placeholder="search_channels" placeholder="Поиск каналов..." oninput="dupSearchChanged()">
+                <select id="dup-cross" onchange="loadDuplicatesPanel(0)">
+                    <option value="" data-t="dup_all">Все дубли</option>
+                    <option value="1" data-t="dup_cross">Между источниками</option>
+                    <option value="0" data-t="dup_same">Внутри источника</option>
+                </select>
+            </div>
+            <div id="duplicates-list"></div>
+            <div style="margin-top:10px;display:flex;gap:6px;align-items:center;">
+                <button class="btn btn-secondary btn-small" id="dup-prev" onclick="dupPage(-1)" disabled data-t="btn_prev">← Назад</button>
+                <button class="btn btn-secondary btn-small" id="dup-next" onclick="dupPage(1)" disabled data-t="btn_next">Вперёд →</button>
+                <span id="dup-page-info" style="font-size:12px;color:var(--text-muted);"></span>
+            </div>
         </div>
 
         <div id="panel-sources" class="panel">
@@ -292,11 +414,14 @@
             <div style="margin-top:28px;">
                 <div class="panel-header">
                     <h2 data-t="sources_epg">Источники ТВ-программы (EPG)</h2>
-                    <button class="btn" onclick="showEPGSourceModal()" data-t="btn_add_epg">Добавить EPG источник</button>
+                    <div style="display:flex;gap:8px;">
+                        <button class="btn btn-secondary" onclick="rebuildEpgUI()" data-t="btn_rebuild_epg">Обновить EPG сейчас</button>
+                        <button class="btn" onclick="showEPGSourceModal()" data-t="btn_add_epg">Добавить EPG источник</button>
+                    </div>
                 </div>
                 <div class="table-scroll">
                     <table>
-                        <thead><tr><th data-t="col_name">Название</th><th data-t="col_url">URL</th><th data-t="col_enabled">Активен</th><th data-t="col_status">Статус</th><th data-t="col_channels_count">Каналов</th><th>Обновлено</th><th data-t="col_actions">Действия</th></tr></thead>
+                        <thead><tr><th data-t="col_name">Название</th><th data-t="col_url">URL</th><th data-t="col_status">Статус</th><th data-t="col_channels_count">Каналов</th><th>Обновлено</th><th data-t="col_enabled">Активен</th><th data-t="col_actions">Действия</th></tr></thead>
                         <tbody id="epg-sources-list"></tbody>
                     </table>
                 </div>
@@ -325,11 +450,33 @@
                 <div class="settings-card">
                     <h3 data-t="playlist_rules">Правила формирования плейлиста</h3>
                     <div class="form-group">
+                        <label data-t="playlist_filename">Имя файла плейлиста</label>
+                        <input type="text" id="set-playlist-filename" placeholder="rus_fixed.m3u">
+                        <span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;" data-t="playlist_filename_desc">Латиница, цифры, . _ -; окончание .m3u или .m3u8</span>
+                    </div>
+                    <div class="form-group">
+                        <label data-t="public_base_url">Публичный адрес сервера</label>
+                        <input type="text" id="set-public-base-url" placeholder="http://your-server:9239">
+                        <span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;" data-t="public_base_url_desc">Для ссылок в шапке плейлиста. Пусто — адрес по умолчанию</span>
+                    </div>
+                    <div class="form-group">
                         <label data-t="min_availability">Минимальная доступность (%)</label>
                         <input type="number" id="set-min-availability" min="0" max="100" step="5">
                         <span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;" data-t="min_availability_desc">Каналы с доступностью ниже этого значения не попадут в плейлист</span>
                     </div>
+                    <div class="form-group">
+                        <label data-t="dedup_strategy">Выбор канала среди дублей</label>
+                        <select id="set-dedup-strategy">
+                            <option value="availability" data-t="dedup_availability">Сначала доступность, потом скорость</option>
+                            <option value="speed" data-t="dedup_speed">Самый быстрый отклик</option>
+                        </select>
+                    </div>
                     <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="set-auto-synonyms">
+                            <label for="set-auto-synonyms" data-t="auto_group_synonyms">Автоматически объединять похожие группы</label>
+                            <span class="desc" data-t="auto_group_synonyms_desc">синонимы при импорте</span>
+                        </div>
                         <div class="checkbox-item">
                             <input type="checkbox" id="pl-all" onchange="onPlaylistAllChange(this.checked)">
                             <label for="pl-all" data-t="all_channels">Все каналы</label>
@@ -446,11 +593,29 @@
             </div>
             <div class="form-group">
                 <label data-t="channel_group">Группа канала</label>
-                <input type="text" id="ch-edit-group" data-t-placeholder="channel_group_placeholder" placeholder="Например: Новости, Кино, Музыка">
+                <input type="text" id="ch-edit-group" list="group-datalist" data-t-placeholder="channel_group_placeholder" placeholder="Например: Новости, Кино, Музыка">
             </div>
+            <div id="ch-edit-dupes" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;"></div>
             <div class="form-actions">
+                <button class="btn btn-secondary" onclick="resetChannelOverride()" id="ch-reset-override-btn" style="display:none;" data-t="group_reset_override">Сбросить ручную правку</button>
                 <button class="btn btn-secondary" onclick="closeChannelModal()" data-t="btn_cancel">Отмена</button>
                 <button class="btn" onclick="saveChannelGroup()" data-t="btn_save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="rename-modal">
+        <div class="modal">
+            <h3 id="rename-modal-title" data-t="group_rename_title">Переименовать группу</h3>
+            <input type="hidden" id="rename-old">
+            <div class="form-group">
+                <label data-t="group_new_name_label">Новое название</label>
+                <input type="text" id="rename-new" list="group-datalist" oninput="updateRenamePreview()">
+            </div>
+            <div id="rename-preview" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;"></div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeRenameModal()" data-t="btn_cancel">Отмена</button>
+                <button class="btn" onclick="saveRename()" data-t="btn_save">Сохранить</button>
             </div>
         </div>
     </div>
@@ -464,8 +629,24 @@
                 <input type="text" id="src-name" data-t-placeholder="source_name_placeholder" placeholder="Например: IPTV Org Russian">
             </div>
             <div class="form-group">
+                <label data-t="label_source_type">Тип источника</label>
+                <div style="display:flex;gap:16px;">
+                    <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                        <input type="radio" name="src-type" id="src-type-url" value="url" checked onchange="onSourceTypeChange()"> <span data-t="source_type_url">Из URL</span>
+                    </label>
+                    <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;">
+                        <input type="radio" name="src-type" id="src-type-file" value="file" onchange="onSourceTypeChange()"> <span data-t="source_type_file">Из файла</span>
+                    </label>
+                </div>
+            </div>
+            <div class="form-group" id="src-url-group">
                 <label data-t="label_url">URL (.m3u / .m3u8)</label>
                 <input type="url" id="src-url" data-t-placeholder="source_url_placeholder" placeholder="https://example.com/playlist.m3u">
+            </div>
+            <div class="form-group" id="src-file-group" style="display:none;">
+                <label data-t="label_file">Файл (.m3u / .m3u8)</label>
+                <input type="file" id="src-file" accept=".m3u,.m3u8">
+                <div id="src-file-info" style="font-size:11px;color:var(--text-muted);margin-top:4px;" data-t="file_upload_hint">Максимум 20 МБ, UTF-8 или Windows-1251</div>
             </div>
             <div class="form-group" style="display:flex;align-items:center;gap:10px;">
                 <label class="toggle"><input type="checkbox" id="src-enabled" checked><span class="slider"></span></label>
@@ -506,6 +687,8 @@
     let allSourcesData = [];
     let chSortKey = 'name';
     let chSortAsc = true;
+    let selectedChannelIds = new Set();
+    let groupSuggestions = [];
 
     const themes = [
         { id: 'dark', icon: '🌙', name: 'Тёмная' },
@@ -551,6 +734,15 @@
     initLang();
     applyTranslations();
 
+    (function initChannelFilters() {
+        const savedDups = localStorage.getItem('hideDups');
+        const cbDups = document.getElementById('ch-hide-dups');
+        if (cbDups && savedDups !== null) cbDups.checked = savedDups === '1';
+        const savedDisabled = localStorage.getItem('hideDisabled');
+        const cbDisabled = document.getElementById('ch-hide-disabled');
+        if (cbDisabled && savedDisabled !== null) cbDisabled.checked = savedDisabled === '1';
+    })();
+
     function api(url, opts = {}) {
         return fetch(url, { headers: { 'Content-Type': 'application/json' }, ...opts })
             .then(r => { if (r.status === 401) { window.location.href = '/login'; throw new Error('Unauthorized'); } return r.ok ? r.json() : Promise.reject(r); });
@@ -560,8 +752,11 @@
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.nav button').forEach(b => b.classList.remove('active'));
         document.getElementById('panel-' + name).classList.add('active');
-        if (btn) btn.classList.add('active');
+        const navBtn = btn || document.getElementById('nav-' + name);
+        if (navBtn) navBtn.classList.add('active');
         if (name === 'channels') { loadChannelsPanel(); }
+        if (name === 'groups') { loadGroupsPanel(); }
+        if (name === 'duplicates') { loadDuplicatesPanel(); }
         if (name === 'sources') { loadSources(); loadEPGSources(); }
         if (name === 'settings') loadSettings();
         if (name === 'access') { loadAccessStats(); loadAccessLog(); }
@@ -604,11 +799,14 @@
     function toggleFilters(prefix) {
         const el = document.getElementById(prefix + '-filters');
         const btn = document.getElementById(prefix + '-filter-toggle');
+        const extras = document.getElementById(prefix + '-toggles');
         if (el.style.display === 'none') {
             el.style.display = 'flex';
+            if (extras) extras.style.display = 'flex';
             btn.textContent = '− Фильтры';
         } else {
             el.style.display = 'none';
+            if (extras) extras.style.display = 'none';
             btn.textContent = '+ Фильтры';
         }
     }
@@ -658,19 +856,73 @@
         }
     }
 
-    function sortArray(arr, key, asc) {
+    function sortArray(arr, key, asc, valFn = null) {
+        const fn = valFn || sortVal;
         return [...arr].sort((a, b) => {
-            let va = sortVal(a, key), vb = sortVal(b, key);
+            let va = fn(a, key), vb = fn(b, key);
             if (va < vb) return asc ? -1 : 1;
             if (va > vb) return asc ? 1 : -1;
             return 0;
         });
     }
 
+    function groupSortVal(g, key) {
+        switch(key) {
+            case 'name': return (g.name || '').toLowerCase();
+            case 'channels': return g.channels || 0;
+            case 'alive': return g.alive || 0;
+            case 'in_playlist': return g.in_playlist || 0;
+            case 'excluded': return g.excluded ? 1 : 0;
+            case 'manual': return g.manual_overrides || 0;
+            default: return '';
+        }
+    }
+
+    function mergeSortVal(m, key) {
+        switch(key) {
+            case 'canonical': return (m.canonical || '').toLowerCase();
+            case 'sources': return (m.sources || []).length;
+            case 'channels': return m.channels || 0;
+            case 'created': {
+                const cs = (m.sources || []).map(s => s.created_at || 0);
+                return cs.length ? Math.min(...cs) : 0;
+            }
+            default: return '';
+        }
+    }
+
+    let groupSortKey = 'channels';
+    let groupSortAsc = false;
+    let mergeSortKey = 'channels';
+    let mergeSortAsc = false;
+
+    function sortGroups(key) {
+        if (groupSortKey === key) groupSortAsc = !groupSortAsc;
+        else { groupSortKey = key; groupSortAsc = key === 'name'; }
+        groupsData = sortArray(groupsData, groupSortKey, groupSortAsc, groupSortVal);
+        renderGroupsTable();
+        updateSortIndicators('groups-table', groupSortKey, groupSortAsc);
+    }
+
+    function sortMerges(key) {
+        if (mergeSortKey === key) mergeSortAsc = !mergeSortAsc;
+        else { mergeSortKey = key; mergeSortAsc = key === 'canonical'; }
+        mergesData = sortArray(mergesData, mergeSortKey, mergeSortAsc, mergeSortVal);
+        renderMerges(mergesData);
+        updateSortIndicators('merges-table', mergeSortKey, mergeSortAsc);
+    }
+
     function updateSortIndicators(tableId, key, asc) {
         const ths = document.querySelectorAll(`#${tableId} th`);
         ths.forEach(th => { th.classList.remove('sorted'); });
-        const cols = { status: 0, name: 1, group: 2, source: 3, response: 4, last_check: 5, url: 6 };
+        // panel-channels: первая колонка - чекбоксы, далее статус/название/группа/...
+        const allCols = {
+            'panel-channels': { status: 1, name: 2, group: 3, source: 4, response: 5, availability: 6, last_check: 7, url: 8 },
+            'groups-table': { name: 1, channels: 2, alive: 3, in_playlist: 4, excluded: 5, manual: 6 },
+            'merges-table': { canonical: 0, sources: 1, channels: 2, created: 3 },
+        };
+        const cols = allCols[tableId]
+            || { status: 0, name: 1, group: 2, source: 3, response: 4, last_check: 5, url: 6 };
         const idx = cols[key];
         if (idx !== undefined && ths[idx]) {
             ths[idx].classList.add('sorted');
@@ -680,7 +932,7 @@
 
     function chRow(ch, showLastCheck = false) {
         let urlDisplay = ch.url;
-        try { const u = new URL(ch.url); urlDisplay = u.hostname + u.pathname.substring(0, 35); } catch(e) {}
+        try { const u = new URL(ch.url); urlDisplay = u.hostname + u.pathname.substring(0, 24); } catch(e) {}
         let availPct = '-';
         if (ch.total_checks > 0) {
             const pct = Math.round((ch.alive_checks / ch.total_checks) * 100);
@@ -691,16 +943,20 @@
         const safeName = esc(ch.name).replace(/'/g, "\\'");
         const safeGroup = esc(ch.group_title).replace(/'/g, "\\'");
         const editOnClick = `showChannelModal(${ch.id}, '${safeName}', '${safeGroup}')`;
-        return `<tr style="cursor:pointer;" onclick="${editOnClick}">
-            <td>${statusDot(ch)} ${statusText(ch)}</td>
-            <td><label class="toggle" style="margin-right:6px;" onclick="event.stopPropagation()"><input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleChannel(${ch.id}, this.checked)"><span class="slider"></span></label><strong>${safeName}</strong></td>
-            <td><span class="group-badge" style="cursor:pointer;">${safeGroup}</span></td>
-            <td>${esc(ch.source_name || '')}</td>
+        const selected = selectedChannelIds.has(ch.id) ? 'checked' : '';
+        const dupBadge = ch.dup_count > 1
+            ? ` <span class="group-badge" style="cursor:pointer;" title="${t('dup_goto')}" onclick="event.stopPropagation();gotoDuplicate(${ch.id})">${ch.dup_winner ? '⭐' : ''}×${ch.dup_count}</span>`
+            : '';
+        return `<tr style="cursor:pointer;" title="${t('row_edit_hint')}" onclick="${editOnClick}">
+            <td onclick="event.stopPropagation()"><input type="checkbox" class="ch-select" value="${ch.id}" ${selected} onchange="onSelectChange(this)"></td>
+            <td class="status-cell">${statusDot(ch)} ${statusText(ch)}</td>
+            <td class="name-cell"><label class="toggle" style="margin-right:6px;" onclick="event.stopPropagation()"><input type="checkbox" ${enabled ? 'checked' : ''} onchange="toggleChannel(${ch.id}, this.checked)"><span class="slider"></span></label><strong>${safeName}</strong>${dupBadge}</td>
+            <td class="group-cell"><span class="group-badge" style="cursor:pointer;">${safeGroup}</span></td>
+            <td class="source-cell">${esc(ch.source_name || '')}</td>
             <td>${fmtTime(ch.response_time_ms)}</td>
             <td>${availPct}</td>
             ${showLastCheck ? '<td>' + fmtDate(ch.last_check) + '</td>' : ''}
             <td class="url-cell" title="${esc(ch.url)}">${esc(urlDisplay)}</td>
-            <td><span style="cursor:pointer;font-size:14px;" onclick="event.stopPropagation();${editOnClick}">✏️</span></td>
         </tr>`;
     }
 
@@ -712,9 +968,10 @@
             const lastCheck = info.last_check ? fmtDate(info.last_check) : t('not_checked');
             const lastEpg = info.last_epg_update ? fmtDate(info.last_epg_update) : t('never');
             const epgInfo = info.epg_channel_count > 0 ? ` | ${t('tvg_program')}: <strong>${info.epg_channel_count}</strong> ${t('channels_word')} | ${t('cache')}: <strong>${lastEpg}</strong>` : '';
-            el.innerHTML = `<span>${t('playlist_info')}: <strong><span id="playlist-count">${info.channel_count}</span></strong> ${t('channels_word')}</span> <span style="margin:0 12px;color:var(--border);">|</span> <span>${t('last_check')}: <strong>${lastCheck}</strong></span>${epgInfo}`;
+            el.innerHTML = `<span>${t('playlist_info')}: <strong><span id="playlist-count">${info.channel_count}</span></strong> ${t('channels_word')}${info.group_count ? `, <strong>${info.group_count}</strong> ${t('groups_word')}` : ''}</span> <span style="margin:0 12px;color:var(--border);">|</span> <span>${t('last_check')}: <strong>${lastCheck}</strong></span>${epgInfo}`;
             const baseUrl = window.location.origin;
-            addrEl.innerHTML = `${t('playlist_address')}: <a href="${baseUrl}/rus_fixed.m3u" target="_blank" style="color:var(--accent);text-decoration:underline;">${baseUrl}/rus_fixed.m3u</a> &nbsp;|&nbsp; ${t('epg_address')}: <a href="${baseUrl}/epg.xml" target="_blank" style="color:var(--accent);text-decoration:underline;">${baseUrl}/epg.xml</a>`;
+            const playlistUrl = info.public_url || `${baseUrl}/${info.filename || 'rus_fixed.m3u'}`;
+            addrEl.innerHTML = `${t('playlist_address')}: <a href="${playlistUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">${playlistUrl}</a> &nbsp;|&nbsp; ${t('epg_address')}: <a href="${baseUrl}/epg.xml" target="_blank" style="color:var(--accent);text-decoration:underline;">${baseUrl}/epg.xml</a> (<a href="${baseUrl}/epg.xml.gz" target="_blank" style="color:var(--accent);text-decoration:underline;">.gz</a>)`;
         } catch(e) {}
     }
 
@@ -770,8 +1027,8 @@
                     statusHtml = `<span class="status-dot dead"></span>${t('source_unavailable')}`;
                 }
                 return `<tr>
-                    <td><strong>${esc(s.name)}</strong></td>
-                    <td class="url-cell" title="${esc(s.url)}">${esc(s.url)}</td>
+                    <td><strong>${esc(s.name)}</strong>${(s.source_type === 'file') ? ` <span class="group-badge">${t('source_type_file_badge')}</span>` : ''}</td>
+                    <td class="url-cell" title="${esc(s.file_path || s.url)}">${esc((s.source_type === 'file') ? (s.file_name || s.url) : s.url)}</td>
                     <td>${statusHtml}</td>
                     <td>${s.channel_count || 0}</td>
                     <td>${s.last_check ? fmtDate(s.last_check) : '-'}</td>
@@ -808,10 +1065,10 @@
                 return `<tr>
                     <td><strong>${esc(s.name)}</strong></td>
                     <td class="url-cell" title="${esc(s.url)}">${esc(s.url)}</td>
-                    <td><label class="toggle"><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleEPGSource(${s.id}, this.checked)"><span class="slider"></span></label></td>
                     <td>${statusHtml}</td>
                     <td>${s.channel_count || 0}</td>
                     <td>${s.last_download ? fmtDate(s.last_download) : 'Никогда'}</td>
+                    <td><label class="toggle"><input type="checkbox" ${s.enabled ? 'checked' : ''} onchange="toggleEPGSource(${s.id}, this.checked)"><span class="slider"></span></label></td>
                     <td>
                         <button class="btn btn-secondary btn-small" onclick="editEPGSource(${s.id})" title="${t('edit_epg_source')}">✏️</button>
                         <button class="btn btn-danger btn-small" onclick="deleteEPGSource(${s.id})" title="${t('btn_delete')}">🗑️</button>
@@ -881,39 +1138,164 @@
         toast(enabled ? t('toast_epg_enabled') : t('toast_epg_disabled'));
     }
 
-    async function loadAllChannels() {
-        allChannelsData = await api('/api/channels');
+    async function rebuildEpgUI() {
+        try {
+            await api('/api/epg/rebuild', { method: 'POST' });
+            toast(t('toast_epg_rebuild_started'));
+            const iv = setInterval(async () => {
+                try {
+                    const s = await api('/api/check/status');
+                    if (!s.in_progress) {
+                        clearInterval(iv);
+                        toast(t('toast_epg_rebuild_done'));
+                        loadEPGSources();
+                        loadPlaylistInfo();
+                    }
+                } catch(e) { clearInterval(iv); }
+            }, 2000);
+        } catch(e) {
+            if (e.status === 409) toast(t('toast_check_running'), 'error');
+            else toast(t('toast_error'), 'error');
+        }
+    }
+
+    function refreshGroupDatalist() {
         const groups = [...new Set(allChannelsData.map(c => c.group_title))].sort();
+        const dl = document.getElementById('group-datalist');
+        if (dl) dl.innerHTML = groups.map(g => `<option value="${esc(g)}">`).join('');
+    }
+
+    function refreshGroupFilterOptions() {
+        if (!allChannelsData.length) return;
+        const hideDisabled = hideDisabledEnabled();
+        const source = hideDisabled ? allChannelsData.filter(c => c.enabled) : allChannelsData;
+        const groups = [...new Set(source.map(c => c.group_title))].sort();
         const sel = document.getElementById('ch-group-filter');
         const curGrp = sel.value;
         sel.innerHTML = `<option value="">${t('all_groups')}</option>` + groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
-        sel.value = curGrp;
+        sel.value = groups.includes(curGrp) ? curGrp : '';
+    }
+
+    function refreshSourceFilterOptions() {
+        if (!allSourcesData.length) return;
+        const hideDisabled = hideDisabledEnabled();
+        let list = allSourcesData;
+        if (hideDisabled) {
+            const allowed = new Set(allChannelsData.filter(c => c.enabled).map(c => c.source_id));
+            list = allSourcesData.filter(s => allowed.has(s.id));
+        }
+        const sel = document.getElementById('ch-source-filter');
+        const cur = sel.value;
+        sel.innerHTML = `<option value="">${t('all_sources')}</option>` + list.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+        sel.value = list.some(s => String(s.id) === cur) ? cur : '';
+    }
+
+    async function loadAllChannels() {
+        allChannelsData = await api('/api/channels');
+        refreshGroupFilterOptions();
+        refreshSourceFilterOptions();
+        refreshGroupDatalist();
+        renderChannels();
+        updateBulkBar();
+    }
+
+    const CH_CHUNK = 300;
+    let chFiltered = [];
+    let chRendered = 0;
+    let chSearchTimer = null;
+
+    function hideDupsEnabled() {
+        return document.getElementById('ch-hide-dups').checked;
+    }
+
+    function onHideDupsChange() {
+        localStorage.setItem('hideDups', hideDupsEnabled() ? '1' : '0');
         renderChannels();
     }
 
-    function renderChannels() {
+    function hideDisabledEnabled() {
+        return document.getElementById('ch-hide-disabled').checked;
+    }
+
+    function onHideDisabledChange() {
+        localStorage.setItem('hideDisabled', hideDisabledEnabled() ? '1' : '0');
+        refreshGroupFilterOptions();
+        refreshSourceFilterOptions();
+        renderChannels();
+    }
+
+    function chSearchChanged() {
+        clearTimeout(chSearchTimer);
+        chSearchTimer = setTimeout(() => renderChannels(), 250);
+    }
+
+    function computeFilteredChannels() {
         const q = document.getElementById('ch-search').value.toLowerCase();
         const filter = document.getElementById('ch-filter').value;
         const grp = document.getElementById('ch-group-filter').value;
         const src = document.getElementById('ch-source-filter').value;
+        const hideDups = hideDupsEnabled();
+        const hideDisabled = hideDisabledEnabled();
         let filtered = allChannelsData.filter(c => {
+            if (hideDisabled && !c.enabled && filter !== 'disabled') return false;
+            if (hideDups && c.dup_count > 1 && !c.dup_winner) return false;
             if (q && !c.name.toLowerCase().includes(q) && !c.url.toLowerCase().includes(q)) return false;
             if (grp && c.group_title !== grp) return false;
             if (src && String(c.source_id) !== src) return false;
             if (filter === 'alive') return c.is_alive && c.last_check != null;
+            if (filter === 'duplicates') return c.dup_count > 1;
             if (filter === 'fast') return c.is_alive && c.response_time_ms != null && c.response_time_ms < 1000;
             if (filter === 'medium') return c.is_alive && c.response_time_ms != null && c.response_time_ms >= 1000 && c.response_time_ms < 3000;
             if (filter === 'slow') return c.is_alive && c.response_time_ms != null && c.response_time_ms >= 3000;
             if (filter === 'dead') return !c.is_alive && c.last_check != null;
+            if (filter === 'disabled') return !c.enabled;
             if (filter === 'unchecked') return c.last_check == null;
             return true;
         });
-        filtered = sortArray(filtered, chSortKey, chSortAsc);
-        document.getElementById('all-channels').innerHTML = filtered.length === 0
-            ? `<tr><td colspan="7" class="empty-state"><p>${t('empty_channels')}</p></td></tr>`
-            : filtered.map(c => chRow(c, true)).join('');
-        document.getElementById('channels-count').textContent = `${t('channels_shown')}: ${filtered.length} ${t('channels_of')} ${allChannelsData.length}`;
+        return sortArray(filtered, chSortKey, chSortAsc);
+    }
+
+    function renderChannels() {
+        chFiltered = computeFilteredChannels();
+        chRendered = 0;
+        const tbody = document.getElementById('all-channels');
+        if (chFiltered.length === 0) {
+            tbody.innerHTML = `<tr><td colspan="9" class="empty-state"><p>${t('empty_channels')}</p></td></tr>`;
+        } else {
+            tbody.innerHTML = '';
+            appendChannelChunk();
+        }
+        updateChannelsCount();
         updateSortIndicators('panel-channels', chSortKey, chSortAsc);
+    }
+
+    function appendChannelChunk() {
+        if (chRendered >= chFiltered.length) return;
+        const chunk = chFiltered.slice(chRendered, chRendered + CH_CHUNK);
+        chRendered += chunk.length;
+        document.getElementById('all-channels').insertAdjacentHTML('beforeend',
+            chunk.map(c => chRow(c, true)).join(''));
+        updateChannelsCount();
+    }
+
+    function updateChannelsCount() {
+        const total = allChannelsData.length;
+        const shown = chFiltered.length;
+        const hidden = hideDupsEnabled() ? allChannelsData.filter(c => c.dup_count > 1 && !c.dup_winner).length : 0;
+        const hiddenDisabled = hideDisabledEnabled() ? allChannelsData.filter(c => !c.enabled).length : 0;
+        let extras = '';
+        if (hidden) extras += `, ${t('channels_hidden_dups')}: ${hidden}`;
+        if (hiddenDisabled) extras += `, ${t('channels_hidden_disabled')}: ${hiddenDisabled}`;
+        document.getElementById('channels-count').textContent =
+            `${t('channels_shown')}: ${Math.min(chRendered, shown)} ${t('channels_of')} ${shown} (${t('channels_total')}: ${total})${extras}`;
+    }
+
+    function onChannelsScroll() {
+        const el = document.getElementById('ch-table-scroll');
+        if (!el) return;
+        if (el.scrollTop + el.clientHeight >= el.scrollHeight - 250) {
+            appendChannelChunk();
+        }
     }
 
     function sortChannels(key) {
@@ -922,39 +1304,158 @@
         renderChannels();
     }
 
+    function selectedIds() { return [...selectedChannelIds]; }
+
+    function toggleSelectAll(checked) {
+        for (const c of chFiltered) {
+            if (checked) selectedChannelIds.add(c.id);
+            else selectedChannelIds.delete(c.id);
+        }
+        document.querySelectorAll('#all-channels .ch-select').forEach(cb => { cb.checked = checked; });
+        updateBulkBar();
+    }
+
+    function onSelectChange(cb) {
+        const id = parseInt(cb.value);
+        if (cb.checked) selectedChannelIds.add(id);
+        else selectedChannelIds.delete(id);
+        updateBulkBar();
+    }
+
+    function updateBulkBar() {
+        const n = selectedChannelIds.size;
+        const bar = document.getElementById('ch-bulk');
+        bar.style.display = n > 0 ? 'flex' : 'none';
+        document.getElementById('ch-selected-count').textContent = `${t('bulk_selected')}: ${n}`;
+        const allChecked = chFiltered.length > 0 && selectedChannelIds.size >= chFiltered.length
+            && chFiltered.every(c => selectedChannelIds.has(c.id));
+        document.getElementById('ch-select-all').checked = allChecked;
+    }
+
+    function clearSelection() {
+        selectedChannelIds.clear();
+        document.querySelectorAll('#all-channels .ch-select').forEach(cb => cb.checked = false);
+        document.getElementById('ch-select-all').checked = false;
+        updateBulkBar();
+    }
+
+    async function bulkAssignGroup() {
+        const group = document.getElementById('ch-bulk-group').value.trim();
+        if (!group) { toast(t('toast_name_url_required'), 'error'); return; }
+        const ids = selectedIds();
+        if (ids.length === 0) return;
+        try {
+            const res = await api('/api/channels/bulk-group', { method: 'PUT', body: JSON.stringify({ ids, group }) });
+            toast(`${t('group_updated')}: ${res.affected}`);
+            clearSelection();
+            await loadAllChannels();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function bulkResetOverrides() {
+        const ids = selectedIds();
+        if (ids.length === 0) return;
+        if (!confirm(t('confirm_reset_overrides'))) return;
+        try {
+            let total = 0;
+            for (const id of ids) {
+                const res = await api(`/api/channels/${id}/override`, { method: 'DELETE' });
+                total += res.affected || 0;
+            }
+            toast(`${t('group_reset_done')}: ${total}`);
+            clearSelection();
+            await loadAllChannels();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function onSourceTypeChange() {
+        const isFile = document.getElementById('src-type-file').checked;
+        document.getElementById('src-url-group').style.display = isFile ? 'none' : '';
+        document.getElementById('src-file-group').style.display = isFile ? '' : 'none';
+    }
+
     function showSourceModal(id = null) {
         document.getElementById('source-modal').classList.add('show');
+        const urlRadio = document.getElementById('src-type-url');
+        const fileRadio = document.getElementById('src-type-file');
+        document.getElementById('src-file').value = '';
         if (id) {
             const s = allSourcesData.find(x => x.id === id);
+            const isFile = (s.source_type || 'url') === 'file';
             document.getElementById('modal-title').textContent = t('edit_source');
             document.getElementById('src-edit-id').value = id;
             document.getElementById('src-name').value = s.name;
-            document.getElementById('src-url').value = s.url;
+            document.getElementById('src-url').value = isFile ? '' : s.url;
             document.getElementById('src-enabled').checked = s.enabled;
+            fileRadio.checked = isFile;
+            urlRadio.checked = !isFile;
+            urlRadio.disabled = true;
+            fileRadio.disabled = true;
+            document.getElementById('src-file-info').textContent = isFile
+                ? `${t('current_file')}: ${s.file_name || s.url}`
+                : t('file_upload_hint');
         } else {
             document.getElementById('modal-title').textContent = t('add_source');
             document.getElementById('src-edit-id').value = '';
             document.getElementById('src-name').value = '';
             document.getElementById('src-url').value = '';
             document.getElementById('src-enabled').checked = true;
+            urlRadio.checked = true;
+            fileRadio.checked = false;
+            urlRadio.disabled = false;
+            fileRadio.disabled = false;
+            document.getElementById('src-file-info').textContent = t('file_upload_hint');
         }
+        onSourceTypeChange();
     }
 
     function closeSourceModal() { document.getElementById('source-modal').classList.remove('show'); }
 
+    function apiForm(url, formData) {
+        return fetch(url, { method: 'POST', body: formData })
+            .then(r => { if (r.status === 401) { window.location.href = '/login'; throw new Error('Unauthorized'); } return r.ok ? r.json() : Promise.reject(r); });
+    }
+
     async function saveSource() {
         const id = document.getElementById('src-edit-id').value;
-        const data = { name: document.getElementById('src-name').value, url: document.getElementById('src-url').value, enabled: document.getElementById('src-enabled').checked };
-        if (!data.name || !data.url) { toast(t('toast_name_url_required'), 'error'); return; }
+        const name = document.getElementById('src-name').value;
+        const enabled = document.getElementById('src-enabled').checked;
+        const isFile = document.getElementById('src-type-file').checked;
+        const fileInput = document.getElementById('src-file');
+        if (!name) { toast(t('toast_name_url_required'), 'error'); return; }
+        if (!id && !isFile && !document.getElementById('src-url').value) { toast(t('toast_name_url_required'), 'error'); return; }
+        if (!id && isFile && !fileInput.files.length) { toast(t('toast_file_required'), 'error'); return; }
         const btn = document.querySelector('#source-modal .btn:not(.btn-secondary)');
         if (btn) { btn.disabled = true; btn.textContent = t('checking'); }
         try {
-            if (id) {
-                await api(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(data) });
-            } else {
-                const res = await api('/api/sources', { method: 'POST', body: JSON.stringify(data) });
+            let res;
+            if (isFile) {
+                const fd = new FormData();
+                if (!id) fd.append('name', name);
+                fd.append('enabled', enabled ? 'true' : 'false');
+                if (fileInput.files.length) fd.append('file', fileInput.files[0]);
+                if (id && !fileInput.files.length) {
+                    await api(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify({ name, enabled }) });
+                    closeSourceModal();
+                    toast(t('toast_source_updated'));
+                    loadSources();
+                    return;
+                }
+                res = id
+                    ? await apiForm(`/api/sources/${id}/file`, fd)
+                    : await apiForm('/api/sources/upload', fd);
                 if (res.channels_found !== undefined) {
-                    toast(`${t('toast_source_added')}: ${res.channels_found} ${t('channels_word')}`);
+                    toast(`${t('toast_source_saved')}: ${res.channels_found} ${t('channels_word')}`);
+                }
+            } else {
+                const data = { name, url: document.getElementById('src-url').value, enabled };
+                if (id) {
+                    await api(`/api/sources/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+                } else {
+                    res = await api('/api/sources', { method: 'POST', body: JSON.stringify(data) });
+                    if (res.channels_found !== undefined) {
+                        toast(`${t('toast_source_added')}: ${res.channels_found} ${t('channels_word')}`);
+                    }
                 }
             }
             closeSourceModal();
@@ -994,6 +1495,12 @@
         document.getElementById('pl-medium').checked = s.playlist_medium;
         document.getElementById('pl-slow').checked = s.playlist_slow;
         document.getElementById('set-min-availability').value = s.min_availability;
+        document.getElementById('set-playlist-filename').value = s.playlist_filename || '';
+        const baseInput = document.getElementById('set-public-base-url');
+        baseInput.value = s.public_base_url || '';
+        baseInput.placeholder = window.location.origin;
+        document.getElementById('set-auto-synonyms').checked = s.auto_group_synonyms !== false;
+        document.getElementById('set-dedup-strategy').value = s.dedup_strategy || 'availability';
         document.getElementById('set-epg-interval').value = s.epg_update_interval;
         document.getElementById('set-availability-period').value = s.availability_period_days;
         let html = `<p style="margin-bottom:6px;">${t('col_status')}: <strong>${status.in_progress ? t('checking') : t('status_waiting')}</strong></p>`;
@@ -1014,16 +1521,31 @@
     }
 
     async function savePlaylistSettings() {
-        await api('/api/settings', { method: 'PUT', body: JSON.stringify({
-            playlist_all: document.getElementById('pl-all').checked,
-            playlist_fast: document.getElementById('pl-fast').checked,
-            playlist_medium: document.getElementById('pl-medium').checked,
-            playlist_slow: document.getElementById('pl-slow').checked,
-            min_availability: parseInt(document.getElementById('set-min-availability').value),
-        })});
-        const res = await api('/api/playlist/generate', { method: 'POST' });
-        document.getElementById('playlist-count').textContent = res.channel_count;
-        toast(t('toast_rules_saved') + ': ' + res.channel_count + ' ' + t('channels_word'));
+        const filename = document.getElementById('set-playlist-filename').value.trim();
+        if (filename && !/^[A-Za-z0-9._-]{1,64}\.m3u8?$/.test(filename)) {
+            toast(t('toast_bad_playlist_name'), 'error');
+            return;
+        }
+        try {
+            await api('/api/settings', { method: 'PUT', body: JSON.stringify({
+                playlist_all: document.getElementById('pl-all').checked,
+                playlist_fast: document.getElementById('pl-fast').checked,
+                playlist_medium: document.getElementById('pl-medium').checked,
+                playlist_slow: document.getElementById('pl-slow').checked,
+                min_availability: parseInt(document.getElementById('set-min-availability').value),
+                auto_group_synonyms: document.getElementById('set-auto-synonyms').checked,
+                dedup_strategy: document.getElementById('set-dedup-strategy').value,
+                playlist_filename: filename,
+                public_base_url: document.getElementById('set-public-base-url').value.trim(),
+            })});
+            const res = await api('/api/playlist/generate', { method: 'POST' });
+            document.getElementById('playlist-count').textContent = res.channel_count;
+            toast(t('toast_rules_saved') + ': ' + res.channel_count + ' ' + t('channels_word'));
+            loadPlaylistInfo();
+        } catch(e) {
+            const msg = e.json ? (await e.json()).detail : e.message;
+            toast(msg || t('toast_error'), 'error');
+        }
     }
 
     async function saveAuthSettings() {
@@ -1140,13 +1662,45 @@
         await api(`/api/channels/${id}/toggle?enabled=${enabled}`, { method: 'PUT' });
         const ch = allChannelsData.find(c => c.id === id);
         if (ch) ch.enabled = enabled ? 1 : 0;
+        // При включённом фильтре «Скрывать отключённые» строка должна
+        // исчезнуть сразу, без полной перерисовки (не сбрасываем прокрутку).
+        if (!enabled && hideDisabledEnabled() && document.getElementById('ch-filter').value !== 'disabled') {
+            const row = document.querySelector(`#all-channels .ch-select[value="${id}"]`);
+            const tr = row ? row.closest('tr') : null;
+            if (tr) tr.remove();
+            chFiltered = chFiltered.filter(c => c.id !== id);
+            if (chRendered > 0) chRendered--;
+        }
+        updateChannelsCount();
     }
 
-    function showChannelModal(id, name, group) {
+    async function showChannelModal(id, name, group) {
         document.getElementById('channel-modal').classList.add('show');
         document.getElementById('ch-edit-id').value = id;
         document.getElementById('ch-edit-name').value = name;
         document.getElementById('ch-edit-group').value = group;
+        document.getElementById('ch-edit-dupes').textContent = '';
+        document.getElementById('ch-reset-override-btn').style.display = 'none';
+        currentModalNorm = null;
+        try {
+            const d = await api(`/api/channels/${id}/duplicates`);
+            currentModalNorm = d.norm_name || null;
+            const info = d.count > 1 ? `${t('group_dupes_apply')}: ${d.count}` : t('group_no_dupes');
+            document.getElementById('ch-edit-dupes').textContent =
+                info + (d.has_override ? ` (${t('group_has_override')})` : '');
+            if (d.has_override) document.getElementById('ch-reset-override-btn').style.display = '';
+        } catch(e) {}
+    }
+
+    let currentModalNorm = null;
+
+    async function refreshAfterGroupEdit() {
+        await loadAllChannels();
+        const dupPanel = document.getElementById('panel-duplicates');
+        if (dupPanel && dupPanel.classList.contains('active')) {
+            if (currentModalNorm) dupExpandNorm = currentModalNorm;
+            await loadDuplicatesPanel(dupOffset);
+        }
     }
 
     function closeChannelModal() {
@@ -1155,27 +1709,548 @@
 
     async function saveChannelGroup() {
         const id = document.getElementById('ch-edit-id').value;
-        const group = document.getElementById('ch-edit-group').value;
+        const group = document.getElementById('ch-edit-group').value.trim();
         if (!group) { toast(t('toast_name_url_required'), 'error'); return; }
         try {
-            await api(`/api/channels/${id}/group?group_title=${encodeURIComponent(group)}`, { method: 'PUT' });
-            const ch = allChannelsData.find(c => c.id === parseInt(id));
-            if (ch) ch.group_title = group;
+            const res = await api(`/api/channels/${id}/group?group_title=${encodeURIComponent(group)}`, { method: 'PUT' });
             closeChannelModal();
-            toast(t('group_updated'));
-            rebuildGroupFilter();
-            renderChannels();
+            toast(`${t('group_updated')}: ${res.affected}`);
+            await refreshAfterGroupEdit();
+        } catch(e) {
+            toast(t('toast_error'), 'error');
+        }
+    }
+
+    async function resetChannelOverride() {
+        const id = document.getElementById('ch-edit-id').value;
+        try {
+            const res = await api(`/api/channels/${id}/override`, { method: 'DELETE' });
+            closeChannelModal();
+            toast(`${t('group_reset_done')}: ${res.affected}`);
+            await refreshAfterGroupEdit();
         } catch(e) {
             toast(t('toast_error'), 'error');
         }
     }
 
     function rebuildGroupFilter() {
-        const groups = [...new Set(allChannelsData.map(c => c.group_title))].sort();
-        const sel = document.getElementById('ch-group-filter');
-        const curGrp = sel.value;
-        sel.innerHTML = `<option value="">${t('all_groups')}</option>` + groups.map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
-        sel.value = curGrp;
+        refreshGroupFilterOptions();
+        refreshGroupDatalist();
+    }
+
+    let groupsData = [];
+    let aliasesData = [];
+    let mergesData = [];
+
+    async function loadGroupsPanel() {
+        try {
+            const data = await api('/api/groups');
+            groupsData = data.groups;
+            aliasesData = data.aliases;
+            mergesData = data.merges || [];
+            renderGroups(data);
+            groupSuggestions = await api('/api/groups/suggestions');
+            renderSuggestions(groupSuggestions);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function renderGroups(data) {
+        document.getElementById('groups-overrides-info').textContent =
+            `${t('groups_manual_edits')}: ${data.overrides_count}`;
+        groupsData = sortArray(data.groups, groupSortKey, groupSortAsc, groupSortVal);
+        mergesData = sortArray(data.merges || [], mergeSortKey, mergeSortAsc, mergeSortVal);
+        renderGroupsTable();
+        renderMerges(mergesData);
+        updateSortIndicators('groups-table', groupSortKey, groupSortAsc);
+        updateSortIndicators('merges-table', mergeSortKey, mergeSortAsc);
+    }
+
+    let selectedGroups = new Set();
+    let grpView = [];
+    let grpQuery = '';
+    let grpSearchTimer = null;
+
+    function grpSearchChanged() {
+        clearTimeout(grpSearchTimer);
+        grpSearchTimer = setTimeout(() => {
+            grpQuery = document.getElementById('grp-search').value.trim().toLowerCase();
+            renderGroupsTable();
+        }, 200);
+    }
+
+    function renderGroupsTable() {
+        const tb = document.getElementById('groups-list');
+        grpView = grpQuery
+            ? groupsData.filter(g => (g.name || '').toLowerCase().includes(grpQuery))
+            : [...groupsData];
+        const counter = document.getElementById('grp-count');
+        if (counter) {
+            counter.textContent = `${t('channels_shown')}: ${grpView.length} ${t('channels_of')} ${groupsData.length}`;
+        }
+        if (grpView.length === 0) {
+            tb.innerHTML = `<tr><td colspan="8" class="empty-state"><p>${groupsData.length ? t('groups_not_found') : t('empty_channels')}</p></td></tr>`;
+            updateGrpBulkBar();
+            return;
+        }
+        tb.innerHTML = grpView.map((g, i) => `<tr style="${g.excluded ? 'opacity:0.55;' : ''}">
+            <td><input type="checkbox" class="grp-select" value="${i}" ${selectedGroups.has(g.name) ? 'checked' : ''} onchange="onGroupSelect(${i}, this.checked)"></td>
+            <td><strong>${esc(g.name)}</strong>${g.excluded ? ` <span class="group-badge">${t('group_excluded_badge')}</span>` : ''}</td>
+            <td>${g.channels}</td>
+            <td>${g.alive}</td>
+            <td>${g.in_playlist}</td>
+            <td><label class="toggle" title="${t('group_exclude_hint_short')}"><input type="checkbox" ${g.excluded ? '' : 'checked'} onchange="toggleGroupExclude(${i}, this.checked)"><span class="slider"></span></label></td>
+            <td>${g.manual_overrides || 0}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-small" onclick="showRenameModal(${i})">${t('group_rename')}</button>
+                <button class="btn btn-secondary btn-small" onclick="mergeGroupUI(${i})">${t('group_merge')}</button>
+                <button class="btn btn-secondary btn-small" onclick="resetGroupUI(${i})" title="${t('group_reset_hint')}" ${g.manual_overrides ? '' : 'disabled style="opacity:0.4;"'}>${t('group_reset')}</button>
+            </td>
+        </tr>`).join('');
+        updateGrpBulkBar();
+    }
+
+    function onGroupSelect(i, checked) {
+        const g = grpView[i];
+        if (!g) return;
+        if (checked) selectedGroups.add(g.name);
+        else selectedGroups.delete(g.name);
+        updateGrpBulkBar();
+    }
+
+    function toggleGroupSelectAll(checked) {
+        if (checked) grpView.forEach(g => selectedGroups.add(g.name));
+        else grpView.forEach(g => selectedGroups.delete(g.name));
+        document.querySelectorAll('#groups-list .grp-select').forEach(cb => { cb.checked = checked; });
+        updateGrpBulkBar();
+    }
+
+    function clearGroupSelection() {
+        selectedGroups.clear();
+        document.querySelectorAll('#groups-list .grp-select').forEach(cb => { cb.checked = false; });
+        document.getElementById('grp-select-all').checked = false;
+        updateGrpBulkBar();
+    }
+
+    function selectedGroupRows() {
+        return groupsData.filter(g => selectedGroups.has(g.name));
+    }
+
+    function updateGrpBulkBar() {
+        const rows = selectedGroupRows();
+        const bar = document.getElementById('grp-bulk');
+        bar.style.display = rows.length > 0 ? 'flex' : 'none';
+        const channels = rows.reduce((s, g) => s + (g.channels || 0), 0);
+        const manual = rows.reduce((s, g) => s + (g.manual_overrides || 0), 0);
+        document.getElementById('grp-selected-count').textContent =
+            `${t('bulk_selected')}: ${rows.length} (${t('channels_word')}: ${channels}${manual ? `, ${t('col_manual').toLowerCase()}: ${manual}` : ''})`;
+        const resetBtn = bar.querySelector('button[data-t="btn_reset_selected"]');
+        if (resetBtn) {
+            resetBtn.disabled = manual === 0;
+            resetBtn.style.opacity = manual === 0 ? '0.4' : '';
+        }
+        const allChecked = grpView.length > 0 && grpView.every(g => selectedGroups.has(g.name));
+        document.getElementById('grp-select-all').checked = allChecked;
+    }
+
+    async function bulkExcludeGroups(excluded) {
+        const rows = selectedGroupRows();
+        if (!rows.length) return;
+        const channels = rows.reduce((s, g) => s + (g.channels || 0), 0);
+        const names = rows.map(g => g.name);
+        const msg = excluded
+            ? `${t('confirm_exclude_selected')} (${names.length}, ${t('channels_word')}: ${channels})?`
+            : `${t('confirm_include_selected')} (${names.length}, ${t('channels_word')}: ${channels})?`;
+        if (!confirm(msg)) return;
+        try {
+            const res = await api('/api/groups/exclude-bulk', { method: 'PUT', body: JSON.stringify({ groups: names, excluded }) });
+            toast(excluded ? `${t('group_excluded')}: ${res.disabled}` : `${t('group_included')}: ${res.enabled}`);
+            selectedGroups.clear();
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function bulkResetGroups() {
+        const rows = selectedGroupRows();
+        if (!rows.length) return;
+        const manual = rows.reduce((s, g) => s + (g.manual_overrides || 0), 0);
+        if (!manual) { toast(t('group_reset_nothing'), 'error'); return; }
+        if (!confirm(`${t('confirm_reset_selected')} (${rows.length}, ${t('col_manual').toLowerCase()}: ${manual})?`)) return;
+        try {
+            const res = await api('/api/groups/reset-bulk', { method: 'POST', body: JSON.stringify({ groups: rows.map(g => g.name) }) });
+            toast(`${t('group_reset_done')}: ${res.affected}`);
+            selectedGroups.clear();
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function fmtDateTime(ts) {
+        if (!ts) return '-';
+        return new Date(ts * 1000).toLocaleString(currentLang === 'ru' ? 'ru' : 'en');
+    }
+
+    function renderMerges(merges) {
+        const tb = document.getElementById('groups-merges');
+        if (!merges || merges.length === 0) {
+            tb.innerHTML = `<tr><td colspan="5" class="empty-state"><p>${t('groups_no_aliases')}</p></td></tr>`;
+            return;
+        }
+        tb.innerHTML = merges.map((m, i) => `<tr>
+            <td><strong>${esc(m.canonical)}</strong></td>
+            <td>${m.sources.map((s, j) => `<span class="group-badge" style="margin:2px;display:inline-block;" title="${t('merge_source_hint')}">${esc(s.display)} <span style="cursor:pointer;" onclick="unmergeUI(${i}, ${j})" title="${t('merge_undo')}">✕</span></span>`).join(' ')}</td>
+            <td>${m.channels}</td>
+            <td style="font-size:12px;">${fmtDateTime(m.sources.length ? m.sources[0].created_at : null)}</td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-secondary btn-small" onclick="unmergeAllUI(${i})">${t('merge_undo_all')}</button>
+            </td>
+        </tr>`).join('');
+    }
+
+    async function unmergeUI(mi, si) {
+        const m = mergesData[mi];
+        if (!m || !m.sources[si]) return;
+        const s = m.sources[si];
+        try {
+            const prev = await api('/api/groups/unmerge', { method: 'POST', body: JSON.stringify({ raws: [s.raw], canonical: m.canonical, preview: true }) });
+            if (!confirm(`${s.display} → ${m.canonical} (${t('merge_restore')}: ${prev.channels})?`)) return;
+            const res = await api('/api/groups/unmerge', { method: 'POST', body: JSON.stringify({ raws: [s.raw], canonical: m.canonical }) });
+            toast(`${t('merge_undone')}: ${res.restored}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function unmergeAllUI(mi) {
+        const m = mergesData[mi];
+        if (!m) return;
+        const raws = m.sources.map(s => s.raw);
+        try {
+            const prev = await api('/api/groups/unmerge', { method: 'POST', body: JSON.stringify({ raws, canonical: m.canonical, preview: true }) });
+            if (!confirm(`${m.canonical} (${t('merge_restore')}: ${prev.channels})?`)) return;
+            const res = await api('/api/groups/unmerge', { method: 'POST', body: JSON.stringify({ raws, canonical: m.canonical }) });
+            toast(`${t('merge_undone')}: ${res.restored}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function renderSuggestions(sugg) {
+        const box = document.getElementById('groups-suggestions');
+        if (!sugg || sugg.length === 0) {
+            box.innerHTML = `<span style="font-size:13px;color:var(--text-muted);">${t('groups_no_suggestions')}</span>`;
+            return;
+        }
+        box.innerHTML = `<div style="margin-bottom:8px;"><button class="btn btn-small" onclick="mergeAllSuggestions()">${t('group_merge_all')}</button></div>` +
+            sugg.map((s, i) => `<div style="font-size:13px;margin-bottom:6px;padding:8px 10px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span>${s.members.map(m => `<span class="group-badge">${esc(m)}</span>`).join(' + ')}</span>
+                <span style="color:var(--text-muted);">→</span>
+                <input type="text" id="sugg-target-${i}" list="group-datalist" value="${esc(s.target)}" title="${t('group_merge_target_hint')}" style="background:var(--bg-input);border:1px solid var(--border);color:var(--text);padding:5px 8px;border-radius:6px;font-size:13px;width:170px;">
+                <span style="color:var(--text-muted);">(${s.channels})</span>
+                ${s.confidence === 'high' ? '' : `<span style="color:var(--text-muted);font-size:11px;" title="${t('group_fuzzy_hint')}">~</span>`}
+                <button class="btn btn-small" onclick="mergeSuggestion(${i})">${t('group_merge')}</button>
+            </div>`).join('');
+    }
+
+    function suggestionTarget(i, fallback) {
+        const el = document.getElementById(`sugg-target-${i}`);
+        const v = el ? el.value.trim() : '';
+        return v || fallback;
+    }
+
+    async function doMerge(sources, target) {
+        const res = await api('/api/groups/merge', { method: 'POST', body: JSON.stringify({ sources, target, remember: true }) });
+        toast(`${t('group_merged')}: ${res.moved}`);
+        await loadGroupsPanel();
+    }
+
+    async function mergeSuggestion(i) {
+        const s = groupSuggestions[i];
+        if (!s) return;
+        const target = suggestionTarget(i, s.target);
+        const sources = s.members.filter(m => m !== target);
+        if (sources.length === 0) { toast(t('group_nothing_to_merge'), 'error'); return; }
+        if (!confirm(`${sources.join(' + ')} → ${target}?`)) return;
+        try { await doMerge(sources, target); }
+        catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function mergeAllSuggestions() {
+        if (!groupSuggestions.length) return;
+        if (!confirm(t('confirm_merge_all'))) return;
+        try {
+            for (let i = 0; i < groupSuggestions.length; i++) {
+                const s = groupSuggestions[i];
+                const target = suggestionTarget(i, s.target);
+                const sources = s.members.filter(m => m !== target);
+                if (sources.length === 0) continue;
+                await api('/api/groups/merge', { method: 'POST', body: JSON.stringify({ sources, target, remember: true }) });
+            }
+            toast(t('group_merged'));
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function showRenameModal(i, presetTarget = '') {
+        const g = grpView[i] || groupsData[i];
+        if (!g) return;
+        document.getElementById('rename-modal').classList.add('show');
+        document.getElementById('rename-old').value = g.name;
+        document.getElementById('rename-modal-title').textContent = `${t('group_rename_title')}: ${g.name}`;
+        document.getElementById('rename-new').value = presetTarget || '';
+        await updateRenamePreview();
+    }
+
+    function closeRenameModal() {
+        document.getElementById('rename-modal').classList.remove('show');
+    }
+
+    async function updateRenamePreview() {
+        const old = document.getElementById('rename-old').value;
+        const cur = document.getElementById('rename-new').value.trim();
+        const box = document.getElementById('rename-preview');
+        if (!cur) { box.textContent = ''; return; }
+        try {
+            const p = await api(`/api/groups/rename/preview?old=${encodeURIComponent(old)}&new=${encodeURIComponent(cur)}`);
+            if (p.noop) { box.textContent = t('group_noop'); return; }
+            box.textContent = `${t('group_rename_preview')}: ${p.channels}` +
+                (p.aliases_retargeted ? `, ${t('group_aliases_retargeted')}: ${p.aliases_retargeted}` : '') +
+                (p.target_exists ? ` (${t('group_target_exists')})` : '');
+        } catch(e) { box.textContent = ''; }
+    }
+
+    async function saveRename() {
+        const old = document.getElementById('rename-old').value;
+        const cur = document.getElementById('rename-new').value.trim();
+        if (!cur) { toast(t('toast_name_url_required'), 'error'); return; }
+        try {
+            const res = await api('/api/groups/rename', { method: 'PUT', body: JSON.stringify({ old, new: cur, remember: true }) });
+            closeRenameModal();
+            toast(`${t('group_renamed')}: ${res.moved}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function renameGroupUI(i) { await showRenameModal(i); }
+
+    async function mergeGroupUI(i) {
+        const g = grpView[i] || groupsData[i];
+        if (!g) return;
+        await showRenameModal(i, '');
+        document.getElementById('rename-modal-title').textContent = `${t('group_merge_title')}: ${g.name}`;
+    }
+
+    async function resetGroupUI(i) {
+        const g = grpView[i] || groupsData[i];
+        if (!g || !g.manual_overrides) return;
+        if (!confirm(`${t('confirm_reset_overrides')} (${g.manual_overrides})?`)) return;
+        try {
+            const res = await api('/api/groups/reset', { method: 'POST', body: JSON.stringify({ group: g.name }) });
+            toast(`${t('group_reset_done')}: ${res.affected}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function resetAllOverridesUI() {
+        try {
+            const info = await api('/api/groups');
+            if (!info.overrides_count) { toast(t('group_reset_nothing'), 'error'); return; }
+            if (!confirm(`${t('confirm_reset_all_overrides')} (${info.overrides_count})?`)) return;
+            const res = await api('/api/groups/reset-all', { method: 'POST' });
+            toast(`${t('group_reset_done')}: ${res.affected}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function rebuildPlaylist() {
+        try {
+            const res = await api('/api/playlist/generate', { method: 'POST' });
+            toast(`${t('toast_playlist_updated')} ${res.channel_count}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function toggleGroupExclude(i, listed) {
+        const g = grpView[i] || groupsData[i];
+        if (!g) return;
+        const excluded = !listed;
+        if (excluded && !confirm(`${t('confirm_exclude_group')} (${g.name}: ${g.channels})?`)) {
+            await loadGroupsPanel();
+            return;
+        }
+        try {
+            const res = await api('/api/groups/exclude', { method: 'PUT', body: JSON.stringify({ group: g.name, excluded }) });
+            toast(excluded ? `${t('group_excluded')}: ${res.disabled}` : `${t('group_included')}: ${res.enabled}`);
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    let dupOffset = 0;
+    const dupLimit = 20;
+    let dupSearchTimer = null;
+    let dupReqId = 0;
+    let dupData = [];
+    let dupExpandNorm = null;
+
+    async function loadDuplicatesPanel(offset = 0) {
+        dupOffset = Math.max(0, offset);
+        const reqId = ++dupReqId;
+        const q = document.getElementById('dup-search').value.trim();
+        const cross = document.getElementById('dup-cross').value;
+        let url = `/api/duplicates?limit=${dupLimit}&offset=${dupOffset}`;
+        if (q) url += `&search=${encodeURIComponent(q)}`;
+        if (cross !== '') url += `&cross_source=${cross === '1'}`;
+        try {
+            const data = await api(url);
+            if (reqId !== dupReqId) return;
+            dupData = data.items;
+            renderDuplicates(data);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function dupSearchChanged() {
+        clearTimeout(dupSearchTimer);
+        dupSearchTimer = setTimeout(() => loadDuplicatesPanel(0), 400);
+    }
+
+    function dupPage(dir) { loadDuplicatesPanel(dupOffset + dir * dupLimit); }
+
+    function toggleDup(i) {
+        const el = document.getElementById(`dup-body-${i}`);
+        if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
+    }
+
+    function dupStatusDot(c) {
+        if (c.last_check == null) return '<span class="status-dot unknown"></span>';
+        if (!c.is_alive) return '<span class="status-dot dead"></span>';
+        return '<span class="status-dot alive"></span>';
+    }
+
+    function renderDuplicates(data) {
+        document.getElementById('dup-info').textContent =
+            `${t('dup_total')}: ${data.total} | ${t('dup_strategy')}: ${data.strategy === 'speed' ? t('dedup_speed') : t('dedup_availability')}`;
+        const box = document.getElementById('duplicates-list');
+        box.innerHTML = data.items.length === 0
+            ? `<div class="empty-state"><p>${t('dup_empty')}</p></div>`
+            : data.items.map((d, i) => {
+                const w = d.copies.find(c => c.id === d.winner_id);
+                return `<div style="margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden;">
+                    <div style="padding:8px 12px;cursor:pointer;display:flex;gap:8px;align-items:center;flex-wrap:wrap;" onclick="toggleDup(${i})">
+                        <strong>${esc(d.display_name)}</strong>
+                        <span class="group-badge">×${d.count}</span>
+                        ${d.cross_source ? `<span class="group-badge">${t('dup_cross')}</span>` : `<span class="group-badge">${t('dup_same')}</span>`}
+                        <span style="font-size:12px;color:var(--text-muted);">${t('dup_winner')}: ${w ? esc(w.source_name) + ' (' + (w.response_time_ms != null ? Math.round(w.response_time_ms) + 'мс' : '-') + (w.availability != null ? ', ' + w.availability + '%' : '') + ')' : '—'}</span>
+                    </div>
+                    <div id="dup-body-${i}" style="display:none;border-top:1px solid var(--border);">
+                        <table style="width:100%;font-size:13px;">
+                            <thead><tr><th>${t('col_source')}</th><th>${t('col_name')}</th><th>${t('col_group')}</th><th>${t('col_status')}</th><th>${t('col_response')}</th><th>${t('col_availability')}</th><th>${t('col_enabled')}</th><th>${t('col_actions')}</th></tr></thead>
+                            <tbody>${d.copies.map((c, ci) => `<tr style="${c.is_winner ? 'background:rgba(46,160,67,0.08);' : ''}">
+                                <td>${c.is_winner ? '⭐ ' : ''}${esc(c.source_name)}</td>
+                                <td>${esc(c.name)}</td>
+                                <td><span class="group-badge" style="cursor:pointer;" title="${t('dup_edit_group')}" onclick="event.stopPropagation();dupEditGroup(${i}, ${ci})">${esc(c.group_title)}</span></td>
+                                <td>${dupStatusDot(c)}</td>
+                                <td>${c.response_time_ms != null ? Math.round(c.response_time_ms) + 'мс' : '-'}</td>
+                                <td>${c.availability != null ? c.availability + '%' : '-'}</td>
+                                <td><label class="toggle"><input type="checkbox" ${c.enabled ? 'checked' : ''} onchange="dupToggleChannel(${i}, ${ci}, this.checked)"><span class="slider"></span></label></td>
+                                <td>${c.is_winner ? `<span class="group-badge">${t('dup_in_playlist')}</span>` : `<button class="btn btn-secondary btn-small" onclick="dupChooseByIdx(${i}, ${ci})">${t('dup_choose')}</button>`}</td>
+                            </tr>`).join('')}</tbody>
+                        </table>
+                        <div style="padding:8px 12px;display:flex;gap:8px;">
+                            <button class="btn btn-secondary btn-small" onclick="dupKeepBest(${i})">${t('dup_keep_best')}</button>
+                            <button class="btn btn-secondary btn-small" onclick="dupEnableAll(${i})">${t('dup_enable_all')}</button>
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        document.getElementById('dup-prev').disabled = dupOffset <= 0;
+        document.getElementById('dup-next').disabled = dupOffset + dupLimit >= data.total;
+        document.getElementById('dup-page-info').textContent =
+            data.total === 0 ? `0 / 0` : `${dupOffset + 1}-${Math.min(dupOffset + dupLimit, data.total)} / ${data.total}`;
+
+        if (dupExpandNorm) {
+            const idx = data.items.findIndex(d => d.norm_name === dupExpandNorm);
+            dupExpandNorm = null;
+            if (idx >= 0) {
+                const body = document.getElementById(`dup-body-${idx}`);
+                if (body) {
+                    body.style.display = '';
+                    const card = body.parentElement;
+                    if (card) card.scrollIntoView({ block: 'nearest' });
+                }
+            }
+        }
+    }
+
+    async function dupKeepBest(i) {
+        const d = dupData[i];
+        if (!d) return;
+        try {
+            const res = await api('/api/duplicates/keep-best', { method: 'PUT', body: JSON.stringify({ norm_name: d.norm_name }) });
+            toast(`${t('dup_kept')}: ${res.disabled}`);
+            await loadDuplicatesPanel(dupOffset);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function dupEditGroup(i, ci) {
+        const d = dupData[i];
+        const c = d && d.copies[ci];
+        if (!c) return;
+        showChannelModal(c.id, c.name, c.group_title);
+    }
+
+    async function dupChooseByIdx(i, ci) {
+        const d = dupData[i];
+        if (!d || !d.copies[ci]) return;
+        try {
+            await api('/api/duplicates/choose', { method: 'PUT', body: JSON.stringify({ norm_name: d.norm_name, channel_id: d.copies[ci].id }) });
+            toast(t('dup_chosen'));
+            await loadDuplicatesPanel(dupOffset);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function dupEnableAll(i) {
+        const d = dupData[i];
+        if (!d) return;
+        try {
+            const res = await api('/api/duplicates/enable-all', { method: 'PUT', body: JSON.stringify({ norm_name: d.norm_name }) });
+            toast(`${t('dup_enabled_all')}: ${res.enabled}`);
+            await loadDuplicatesPanel(dupOffset);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function dupToggleChannel(i, ci, enabled) {
+        const d = dupData[i];
+        if (!d || !d.copies[ci]) return;
+        try {
+            await api(`/api/channels/${d.copies[ci].id}/toggle?enabled=${enabled}`, { method: 'PUT' });
+            await loadDuplicatesPanel(dupOffset);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function dupAutoUI() {
+        try {
+            const prev = await api('/api/duplicates/auto', { method: 'POST', body: JSON.stringify({ preview: true }) });
+            if (!prev.will_disable) { toast(t('dup_nothing_to_disable')); return; }
+            if (!confirm(`${t('confirm_dup_auto')} (${prev.keys}, ${t('dup_will_disable')}: ${prev.will_disable})?`)) return;
+            const res = await api('/api/duplicates/auto', { method: 'POST', body: JSON.stringify({ preview: false }) });
+            toast(`${t('dup_auto_done')}: ${res.disabled}`);
+            await loadDuplicatesPanel(dupOffset);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    async function dupUndoAutoUI() {
+        try {
+            const res = await api('/api/duplicates/undo-auto', { method: 'POST' });
+            toast(`${t('dup_undo_done')}: ${res.enabled}`);
+            await loadDuplicatesPanel(dupOffset);
+        } catch(e) { toast(t('toast_error'), 'error'); }
+    }
+
+    function gotoDuplicate(id) {
+        const info = allChannelsData.find(c => c.id === id);
+        if (info) {
+            dupExpandNorm = info.norm_name || null;
+            if (info.name) document.getElementById('dup-search').value = info.name;
+            const crossSel = document.getElementById('dup-cross');
+            if (crossSel && crossSel.value !== '') crossSel.value = '';
+        }
+        showPanel('duplicates');
     }
 
     function accessPage(dir) {
