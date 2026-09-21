@@ -203,6 +203,11 @@ class GroupUnmerge(BaseModel):
     preview: bool = False
 
 
+class GroupUnmergeBulk(BaseModel):
+    canonicals: list[str]
+    preview: bool = False
+
+
 class GroupExclude(BaseModel):
     group: str
     excluded: bool = True
@@ -852,22 +857,20 @@ async def rename_preview(old: str, new: str):
     }
 
 
-@app.post("/api/groups/unmerge")
-async def unmerge_groups(u: GroupUnmerge):
-    target = (u.canonical or "").strip()
-    raws = [groups_module.mech_key(r) for r in (u.raws or []) if r]
+def _unmerge_one(target, raws, channels, aliases, overrides, auto_syn, preview=False):
+    """Отменить одно объединение: вернуть каналы и удалить алиасы.
+
+    Возвращает (restored, skipped_overrides, aliases_deleted, channels_would_restore).
+    """
+    raws = [groups_module.mech_key(r) for r in (raws or []) if r]
     if not target or not raws:
-        raise HTTPException(400, detail="Need canonical and at least one source")
-    aliases = db.get_group_aliases()
+        return 0, 0, 0, 0
     remaining = {k: v for k, v in aliases.items() if k not in raws}
-    channels = db.get_channels()
     affected = [c for c in channels
                 if groups_module.mech_key(c.get("source_group") or "") in raws
                 and c["group_title"] == target]
-    if u.preview:
-        return {"ok": True, "channels": len(affected), "aliases": len(raws)}
-    overrides = db.get_group_overrides()
-    auto_syn = db.get_setting("auto_group_synonyms", "1") == "1"
+    if preview:
+        return 0, 0, len(raws), len(affected)
     restored = 0
     skipped = 0
     for c in affected:
@@ -879,8 +882,64 @@ async def unmerge_groups(u: GroupUnmerge):
         restored += 1
     for r in raws:
         db.delete_group_alias(r)
+    return restored, skipped, len(raws), 0
+
+
+@app.post("/api/groups/unmerge")
+async def unmerge_groups(u: GroupUnmerge):
+    target = (u.canonical or "").strip()
+    raws = [r for r in (u.raws or []) if r]
+    if not target or not raws:
+        raise HTTPException(400, detail="Need canonical and at least one source")
+    aliases = db.get_group_aliases()
+    channels = db.get_channels()
+    if u.preview:
+        restored, skipped, aliases_n, would = _unmerge_one(
+            target, raws, channels, aliases, {}, "1", preview=True)
+        return {"ok": True, "channels": would, "aliases": aliases_n}
+    overrides = db.get_group_overrides()
+    auto_syn = db.get_setting("auto_group_synonyms", "1") == "1"
+    restored, skipped, aliases_n, _ = _unmerge_one(
+        target, raws, channels, aliases, overrides, auto_syn)
     return {"ok": True, "restored": restored,
-            "skipped_overrides": skipped, "aliases_deleted": len(raws)}
+            "skipped_overrides": skipped, "aliases_deleted": aliases_n}
+
+
+@app.post("/api/groups/unmerge-bulk")
+async def unmerge_groups_bulk(u: GroupUnmergeBulk):
+    canonicals = [c.strip() for c in (u.canonicals or []) if c and c.strip()]
+    if not canonicals:
+        raise HTTPException(400, detail="No merges selected")
+    aliases = db.get_group_aliases()
+    channels = db.get_channels()
+    raws_by_target = {}
+    for raw, canonical in aliases.items():
+        raws_by_target.setdefault(canonical, []).append(raw)
+    if u.preview:
+        merges = aliases_n = would = 0
+        for target in canonicals:
+            raws = raws_by_target.get(target, [])
+            if not raws:
+                continue
+            _, _, n, ch = _unmerge_one(target, raws, channels, aliases, {}, "1", preview=True)
+            merges += 1
+            aliases_n += n
+            would += ch
+        return {"ok": True, "merges": merges, "aliases": aliases_n, "channels": would}
+    overrides = db.get_group_overrides()
+    auto_syn = db.get_setting("auto_group_synonyms", "1") == "1"
+    merges = restored = skipped = aliases_n = 0
+    for target in canonicals:
+        raws = raws_by_target.get(target, [])
+        if not raws:
+            continue
+        r, s, n, _ = _unmerge_one(target, raws, channels, aliases, overrides, auto_syn)
+        merges += 1
+        restored += r
+        skipped += s
+        aliases_n += n
+    return {"ok": True, "merges": merges, "restored": restored,
+            "skipped_overrides": skipped, "aliases_deleted": aliases_n}
 
 
 def _apply_group_exclusion(group, excluded, channels, by_id):

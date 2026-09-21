@@ -360,9 +360,15 @@
             </div>
             <div style="font-size:12px;color:var(--text-muted);margin-top:6px;" data-t="group_exclude_hint">Исключённая группа не попадает в плейлист и ТВ-программу; её каналы выключаются, новые — тоже.</div>
             <h3 style="font-size:14px;margin:20px 0 8px;" data-t="groups_aliases">Запомненные объединения</h3>
+            <div id="merge-bulk" style="display:none;margin-bottom:8px;gap:8px;align-items:center;flex-wrap:wrap;">
+                <span id="merge-selected-count" style="font-size:13px;color:var(--text-muted);"></span>
+                <button class="btn btn-small" onclick="bulkUnmergeSelected()" data-t="btn_unmerge_selected">Отменить выбранные</button>
+                <button class="btn btn-secondary btn-small" onclick="clearMergeSelection()">✕</button>
+            </div>
             <div class="table-scroll">
                 <table id="merges-table">
                     <thead><tr>
+                        <th style="width:34px;"><input type="checkbox" id="merge-select-all" onchange="toggleMergeSelectAll(this.checked)" title="Выбрать все"></th>
                         <th onclick="sortMerges('canonical')"><span data-t="merge_target">Куда</span> <span class="sort-arrow">▲</span></th>
                         <th onclick="sortMerges('sources')"><span data-t="merge_sources">Откуда</span> <span class="sort-arrow">▲</span></th>
                         <th onclick="sortMerges('channels')"><span data-t="col_channels_count">Каналов</span> <span class="sort-arrow">▲</span></th>
@@ -1909,13 +1915,22 @@
         return new Date(ts * 1000).toLocaleString(currentLang === 'ru' ? 'ru' : 'en');
     }
 
+    let selectedMerges = new Set();
+
     function renderMerges(merges) {
         const tb = document.getElementById('groups-merges');
+        // чистим выбор от исчезнувших объединений
+        const alive = new Set((merges || []).map(m => m.canonical));
+        for (const name of [...selectedMerges]) {
+            if (!alive.has(name)) selectedMerges.delete(name);
+        }
         if (!merges || merges.length === 0) {
-            tb.innerHTML = `<tr><td colspan="5" class="empty-state"><p>${t('groups_no_aliases')}</p></td></tr>`;
+            tb.innerHTML = `<tr><td colspan="6" class="empty-state"><p>${t('groups_no_aliases')}</p></td></tr>`;
+            updateMergeBulkBar();
             return;
         }
         tb.innerHTML = merges.map((m, i) => `<tr>
+            <td><input type="checkbox" class="merge-select" value="${i}" ${selectedMerges.has(m.canonical) ? 'checked' : ''} onchange="onMergeSelect(${i}, this.checked)"></td>
             <td><strong>${esc(m.canonical)}</strong></td>
             <td>${m.sources.map((s, j) => `<span class="group-badge" style="margin:2px;display:inline-block;" title="${t('merge_source_hint')}">${esc(s.display)} <span style="cursor:pointer;" onclick="unmergeUI(${i}, ${j})" title="${t('merge_undo')}">✕</span></span>`).join(' ')}</td>
             <td>${m.channels}</td>
@@ -1924,6 +1939,56 @@
                 <button class="btn btn-secondary btn-small" onclick="unmergeAllUI(${i})">${t('merge_undo_all')}</button>
             </td>
         </tr>`).join('');
+        updateMergeBulkBar();
+    }
+
+    function onMergeSelect(i, checked) {
+        const m = mergesData[i];
+        if (!m) return;
+        if (checked) selectedMerges.add(m.canonical);
+        else selectedMerges.delete(m.canonical);
+        updateMergeBulkBar();
+    }
+
+    function toggleMergeSelectAll(checked) {
+        if (checked) mergesData.forEach(m => selectedMerges.add(m.canonical));
+        else selectedMerges.clear();
+        document.querySelectorAll('#groups-merges .merge-select').forEach(cb => { cb.checked = checked; });
+        updateMergeBulkBar();
+    }
+
+    function clearMergeSelection() {
+        selectedMerges.clear();
+        document.querySelectorAll('#groups-merges .merge-select').forEach(cb => { cb.checked = false; });
+        document.getElementById('merge-select-all').checked = false;
+        updateMergeBulkBar();
+    }
+
+    function updateMergeBulkBar() {
+        const rows = mergesData.filter(m => selectedMerges.has(m.canonical));
+        const bar = document.getElementById('merge-bulk');
+        bar.style.display = rows.length > 0 ? 'flex' : 'none';
+        const channels = rows.reduce((s, m) => s + (m.channels || 0), 0);
+        const sources = rows.reduce((s, m) => s + ((m.sources || []).length), 0);
+        document.getElementById('merge-selected-count').textContent =
+            `${t('bulk_selected')}: ${rows.length} (${t('channels_word')}: ${channels}, ${t('merge_sources').toLowerCase()}: ${sources})`;
+        const allChecked = mergesData.length > 0 && rows.length === mergesData.length;
+        const selAll = document.getElementById('merge-select-all');
+        if (selAll) selAll.checked = allChecked;
+    }
+
+    async function bulkUnmergeSelected() {
+        const canonicals = [...selectedMerges];
+        if (!canonicals.length) return;
+        try {
+            const prev = await api('/api/groups/unmerge-bulk', { method: 'POST', body: JSON.stringify({ canonicals, preview: true }) });
+            if (!prev.merges) { toast(t('merge_nothing_selected'), 'error'); return; }
+            if (!confirm(`${t('confirm_unmerge_selected')}: ${prev.merges} (${t('channels_word')}: ${prev.channels}, ${t('merge_sources').toLowerCase()}: ${prev.aliases})?`)) return;
+            const res = await api('/api/groups/unmerge-bulk', { method: 'POST', body: JSON.stringify({ canonicals }) });
+            clearMergeSelection();
+            toast(`${t('merge_undone')}: ${res.restored}` + (res.skipped_overrides ? ` (${t('group_has_override')}: ${res.skipped_overrides})` : ''));
+            await loadGroupsPanel();
+        } catch(e) { toast(t('toast_error'), 'error'); }
     }
 
     async function unmergeUI(mi, si) {
