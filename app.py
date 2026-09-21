@@ -151,6 +151,7 @@ class SettingsUpdate(BaseModel):
     playlist_medium: bool | None = None
     playlist_slow: bool | None = None
     epg_update_interval: int | None = None
+    epg_url_gzip: bool | None = None
     availability_period_days: int | None = None
     min_availability: int | None = None
     dedup_strategy: str | None = None
@@ -340,6 +341,7 @@ async def get_settings():
         "playlist_medium": db.get_setting("playlist_medium", "1") == "1",
         "playlist_slow": db.get_setting("playlist_slow", "1") == "1",
         "epg_update_interval": int(db.get_setting("epg_update_interval", "86400")),
+        "epg_url_gzip": db.get_setting("epg_url_gzip", "0") == "1",
         "availability_period_days": int(db.get_setting("availability_period_days", "7")),
         "min_availability": int(db.get_setting("min_availability", "0")),
         "dedup_strategy": db.get_setting("dedup_strategy", "availability"),
@@ -371,6 +373,8 @@ async def update_settings(s: SettingsUpdate):
         db.set_setting("playlist_slow", "1" if s.playlist_slow else "0")
     if s.epg_update_interval is not None:
         db.set_setting("epg_update_interval", s.epg_update_interval)
+    if s.epg_url_gzip is not None:
+        db.set_setting("epg_url_gzip", "1" if s.epg_url_gzip else "0")
     if s.availability_period_days is not None:
         db.set_setting("availability_period_days", s.availability_period_days)
     if s.min_availability is not None:
@@ -1389,7 +1393,8 @@ def generate_playlist_file():
     logos_replaced = 0
 
     base_url = public_base_url()
-    epg_url = f"{base_url}/epg.xml"
+    epg_suffix = "/epg.xml.gz" if db.get_setting("epg_url_gzip", "0") == "1" else "/epg.xml"
+    epg_url = f"{base_url}{epg_suffix}"
     lines = [f'#EXTM3U x-tvg-url="{epg_url}" url-tvg="{epg_url}"\n']
     snapshot = {}
     for ch in unique:

@@ -540,7 +540,14 @@
                         <label data-t="epg_update_interval">Интервал обновления кэша EPG (секунды)</label>
                         <input type="number" id="set-epg-interval" min="3600" step="3600">
                     </div>
-                    <button class="btn" onclick="saveSettings()" data-t="btn_save">Сохранить</button>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="set-epg-gzip">
+                            <label for="set-epg-gzip" data-t="epg_url_gzip">Ссылка на программу в формате .gz</label>
+                        </div>
+                    </div>
+                    <span style="font-size:11px;color:var(--text-muted);margin-top:6px;display:block;" data-t="epg_url_gzip_desc">В шапке плейлиста будет /epg.xml.gz — для плееров, которые не запрашивают gzip. Применится при следующей пересборке плейлиста</span>
+                    <button class="btn" onclick="saveSettings()" data-t="btn_save" style="margin-top:12px;">Сохранить</button>
                 </div>
 
                 <div class="settings-card">
@@ -1511,6 +1518,7 @@
         document.getElementById('set-auto-synonyms').checked = s.auto_group_synonyms !== false;
         document.getElementById('set-dedup-strategy').value = s.dedup_strategy || 'availability';
         document.getElementById('set-epg-interval').value = s.epg_update_interval;
+        document.getElementById('set-epg-gzip').checked = !!s.epg_url_gzip;
         document.getElementById('set-availability-period').value = s.availability_period_days;
         let html = `<p style="margin-bottom:6px;">${t('col_status')}: <strong>${status.in_progress ? t('checking') : t('status_waiting')}</strong></p>`;
         if (status.last_check) html += `<p style="font-size:12px;color:var(--text-muted);">${t('last')}: ${fmtDate(status.last_check)}</p>`;
@@ -1524,6 +1532,7 @@
             check_timeout: parseInt(document.getElementById('set-timeout').value),
             check_parallel: parseInt(document.getElementById('set-parallel').value),
             epg_update_interval: parseInt(document.getElementById('set-epg-interval').value),
+            epg_url_gzip: document.getElementById('set-epg-gzip').checked,
             availability_period_days: parseInt(document.getElementById('set-availability-period').value),
         })});
         toast(t('toast_settings_saved'));
