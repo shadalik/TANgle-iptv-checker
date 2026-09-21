@@ -185,7 +185,7 @@ def run_check(progress_callback=None):
             print(f"[checker] Error fetching source {source['name']}: {e}")
             continue
 
-    all_channels = db.get_channels()
+    all_channels = db.get_channels(active_sources_only=True)
     if not all_channels:
         if progress_callback:
             progress_callback(1, 1, "No channels")

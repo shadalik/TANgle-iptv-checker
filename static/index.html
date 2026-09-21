@@ -416,6 +416,7 @@
                     <tbody id="sources-list"></tbody>
                 </table>
             </div>
+            <div style="font-size:12px;color:var(--text-muted);margin-top:6px;" data-t="sources_disabled_hint">Каналы отключённых источников не проверяются и не попадают в плейлист (галочки каналов не меняются)</div>
 
             <div style="margin-top:28px;">
                 <div class="panel-header">
@@ -779,6 +780,8 @@
         applyTranslations();
     }
 
+    let lastStats = {};
+
     async function loadChannelsPanel() {
         await loadSources();
         const [stats, status, epgSources] = await Promise.all([
@@ -786,12 +789,14 @@
             api('/api/check/status'),
             api('/api/epg-sources')
         ]);
+        lastStats = stats;
         loadPlaylistInfo();
         document.getElementById('stats-grid').innerHTML = `
             <div class="stat-card"><div class="value">${stats.total_channels}</div><div class="label">${t('total_channels')}</div></div>
             <div class="stat-card green"><div class="value">${stats.alive_channels}</div><div class="label">${t('alive')}</div></div>
             <div class="stat-card red"><div class="value">${stats.dead_channels}</div><div class="label">${t('dead')}</div></div>
             <div class="stat-card yellow"><div class="value">${stats.sources}</div><div class="label">${t('playlist_sources')}</div></div>
+            <div class="stat-card"><div class="value">${stats.inactive_sources || 0}</div><div class="label">${t('disabled_sources')} · ${t('channels_word')}: ${stats.inactive_source_channels || 0}</div></div>
             <div class="stat-card"><div class="value">${epgSources.length}</div><div class="label">${t('epg_sources')}</div></div>
             <div class="stat-card"><div class="value">${stats.avg_response_ms != null ? Math.round(stats.avg_response_ms) + 'ms' : '-'}</div><div class="label">${t('avg_response')}</div></div>
         `;
@@ -1299,9 +1304,11 @@
         const shown = chFiltered.length;
         const hidden = hideDupsEnabled() ? allChannelsData.filter(c => c.dup_count > 1 && !c.dup_winner).length : 0;
         const hiddenDisabled = hideDisabledEnabled() ? allChannelsData.filter(c => !c.enabled).length : 0;
+        const hiddenInactive = lastStats.inactive_source_channels || 0;
         let extras = '';
         if (hidden) extras += `, ${t('channels_hidden_dups')}: ${hidden}`;
         if (hiddenDisabled) extras += `, ${t('channels_hidden_disabled')}: ${hiddenDisabled}`;
+        if (hiddenInactive) extras += `, ${t('channels_hidden_inactive')}: ${hiddenInactive}`;
         document.getElementById('channels-count').textContent =
             `${t('channels_shown')}: ${Math.min(chRendered, shown)} ${t('channels_of')} ${shown} (${t('channels_total')}: ${total})${extras}`;
     }

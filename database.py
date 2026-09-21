@@ -702,16 +702,19 @@ CHANNEL_LIGHT_COLUMNS = (
 )
 
 
-def get_channels(source_id=None, alive_only=False, light=False):
+def get_channels(source_id=None, alive_only=False, light=False, active_sources_only=False):
     with get_conn() as conn:
         cols = CHANNEL_LIGHT_COLUMNS if light else "c.*"
-        q = f"SELECT {cols}, s.name as source_name FROM channels c LEFT JOIN sources s ON c.source_id=s.id"
+        q = (f"SELECT {cols}, s.name as source_name, s.enabled as source_enabled "
+             f"FROM channels c LEFT JOIN sources s ON c.source_id=s.id")
         conditions, params = [], []
         if source_id:
             conditions.append("c.source_id=?")
             params.append(source_id)
         if alive_only:
             conditions.append("c.is_alive=1")
+        if active_sources_only:
+            conditions.append("s.enabled=1")
         if conditions:
             q += " WHERE " + " AND ".join(conditions)
         q += " ORDER BY c.group_title, c.name"
@@ -720,17 +723,30 @@ def get_channels(source_id=None, alive_only=False, light=False):
 
 def get_stats():
     with get_conn() as conn:
-        total = conn.execute("SELECT COUNT(*) as cnt FROM channels").fetchone()["cnt"]
-        alive = conn.execute("SELECT COUNT(*) as cnt FROM channels WHERE is_alive=1").fetchone()["cnt"]
-        sources = conn.execute("SELECT COUNT(*) as cnt FROM sources").fetchone()["cnt"]
+        total = conn.execute(
+            "SELECT COUNT(*) as cnt FROM channels c JOIN sources s ON s.id=c.source_id WHERE s.enabled=1"
+        ).fetchone()["cnt"]
+        alive = conn.execute(
+            "SELECT COUNT(*) as cnt FROM channels c JOIN sources s ON s.id=c.source_id WHERE s.enabled=1 AND c.is_alive=1"
+        ).fetchone()["cnt"]
+        sources = conn.execute("SELECT COUNT(*) as cnt FROM sources WHERE enabled=1").fetchone()["cnt"]
+        inactive_sources = conn.execute(
+            "SELECT COUNT(*) as cnt FROM sources WHERE enabled=0"
+        ).fetchone()["cnt"]
+        inactive_channels = conn.execute(
+            "SELECT COUNT(*) as cnt FROM channels c JOIN sources s ON s.id=c.source_id WHERE s.enabled=0"
+        ).fetchone()["cnt"]
         avg_ms = conn.execute(
-            "SELECT AVG(response_time_ms) as avg_ms FROM channels WHERE is_alive=1 AND response_time_ms IS NOT NULL"
+            "SELECT AVG(c.response_time_ms) as avg_ms FROM channels c JOIN sources s ON s.id=c.source_id "
+            "WHERE s.enabled=1 AND c.is_alive=1 AND c.response_time_ms IS NOT NULL"
         ).fetchone()["avg_ms"]
         return {
             "total_channels": total,
             "alive_channels": alive,
             "dead_channels": total - alive,
             "sources": sources,
+            "inactive_sources": inactive_sources,
+            "inactive_source_channels": inactive_channels,
             "avg_response_ms": round(avg_ms, 1) if avg_ms else None,
         }
 

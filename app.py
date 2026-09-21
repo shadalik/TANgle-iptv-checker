@@ -622,7 +622,8 @@ async def get_epg(request: Request):
 
 @app.get("/api/channels")
 async def list_channels(source_id: int | None = None, alive: bool | None = None):
-    channels = db.get_channels(source_id=source_id, alive_only=(alive is True), light=True)
+    channels = db.get_channels(source_id=source_id, alive_only=(alive is True), light=True,
+                               active_sources_only=True)
     payload = json.dumps(_serialize_channels(channels), ensure_ascii=False,
                          separators=(",", ":")).encode("utf-8")
     return Response(content=payload, media_type="application/json")
@@ -1096,7 +1097,7 @@ def _duplicate_keys(channels):
 @app.get("/api/duplicates")
 async def list_duplicates(search: str | None = None, cross_source: bool | None = None,
                           limit: int = 50, offset: int = 0):
-    channels = db.get_channels()
+    channels = db.get_channels(active_sources_only=True)
     sources = {s["id"]: s["name"] for s in db.get_sources()}
     for c in channels:
         c["source_name"] = sources.get(c.get("source_id"), "")
@@ -1147,7 +1148,7 @@ async def dup_choose(a: DupAction):
 
 
 async def _dup_set_winner(norm_name, channel_id):
-    channels = db.get_channels()
+    channels = db.get_channels(active_sources_only=True)
     copies = [c for c in channels if groups_module.norm_name(c.get("name") or "") == norm_name]
     if len(copies) < 2:
         raise HTTPException(404, detail="No duplicates found")
@@ -1172,7 +1173,7 @@ async def _dup_set_winner(norm_name, channel_id):
 
 @app.put("/api/duplicates/enable-all")
 async def dup_enable_all(a: DupAction):
-    channels = db.get_channels()
+    channels = db.get_channels(active_sources_only=True)
     ids = [c["id"] for c in channels
            if groups_module.norm_name(c.get("name") or "") == a.norm_name]
     if not ids:
@@ -1184,7 +1185,7 @@ async def dup_enable_all(a: DupAction):
 
 @app.post("/api/duplicates/auto")
 async def dup_auto(a: DupAuto):
-    channels = db.get_channels()
+    channels = db.get_channels(active_sources_only=True)
     st = _selection_settings()
     keys = _duplicate_keys(channels)
     to_disable = set()
@@ -1349,7 +1350,7 @@ def generate_playlist_file():
     strategy = db.get_setting("dedup_strategy", "availability")
     excluded = set(db.get_excluded_groups().keys())
 
-    channels = db.get_channels()
+    channels = db.get_channels(active_sources_only=True)
 
     # Единая логика отбора: фильтры + один победитель на имя
     # (та же, что показывает вкладка "Дубли")
