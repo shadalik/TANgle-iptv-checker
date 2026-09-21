@@ -1,8 +1,6 @@
 const TRANSLATIONS = {
     ru: {
         // Header
-        title: 'TANgle',
-        subtitle: 'IPTV checker',
         nav_channels: 'Каналы',
         nav_sources: 'Источники',
         nav_settings: 'Настройки',
@@ -28,7 +26,6 @@ const TRANSLATIONS = {
         avg_response: 'Средний отклик',
         btn_check: 'Проверить сейчас',
         checking: 'Проверка...',
-        latest_channels: 'Последние каналы',
 
         // Channels
         search_channels: 'Поиск каналов...',
@@ -74,15 +71,10 @@ const TRANSLATIONS = {
         toast_epg_rebuild_done: 'EPG обновлён',
         col_enabled: 'Активен',
         col_channels_count: 'Каналов',
-        col_checked: 'Проверен',
         col_actions: 'Действия',
-        source_status_available: 'Доступен',
-        source_status_unavailable: 'Недоступен',
-        source_status_unknown: 'Не проверен',
         source_available: 'Доступен',
         source_unavailable: 'Недоступен',
         source_not_checked: 'Не проверен',
-        never_checked: 'Никогда',
 
         // Source Modal
         add_source: 'Добавить источник',
@@ -106,16 +98,12 @@ const TRANSLATIONS = {
         group_reset: 'Сбросить правки',
         group_reset_hint: 'Убрать ручные правки и вернуть группы из источников',
         group_reset_override: 'Сбросить ручную правку',
-        group_new_name: 'Новое название группы:',
-        group_merge_target: 'В какую группу объединить?',
         group_dupes_apply: 'Правка применится к дублям',
         group_no_dupes: 'Дублей в других источниках нет',
         group_has_override: 'есть ручная правка',
         group_merged: 'Группы объединены',
         group_renamed: 'Группа переименована',
         group_reset_done: 'Правки сброшены',
-        group_alias_deleted: 'Объединение удалено',
-        group_alias_delete: 'Удалить запомненное объединение',
         group_merge_target_hint: 'Конечное имя группы — можно изменить',
         group_fuzzy_hint: 'Примерное совпадение, проверьте перед слиянием',
         group_nothing_to_merge: 'Нечего объединять',
@@ -200,10 +188,6 @@ const TRANSLATIONS = {
         confirm_merge_all: 'Объединить все предложенные группы?',
         confirm_reset_overrides: 'Сбросить ручные правки групп?',
         btn_refresh: 'Обновить',
-        error_playlist_load: 'Не удалось загрузить плейлист:',
-        error_not_m3u: 'Файл не является M3U/M3U8 плейлистом (не найдены теги #EXTM3U или #EXTINF)',
-        error_no_channels: 'Плейлист не содержит каналов',
-        error_empty_file: 'Файл пустой',
         delete_selected: 'Удалить выбранное',
         period_from: 'С',
         period_to: 'По',
@@ -212,6 +196,7 @@ const TRANSLATIONS = {
         label_enabled: 'Активен',
         btn_cancel: 'Отмена',
         btn_save: 'Сохранить',
+        btn_delete: 'Удалить',
         source_name_placeholder: 'Например: IPTV Org Russian',
         source_url_placeholder: 'https://example.com/playlist.m3u',
         label_source_type: 'Тип источника',
@@ -228,13 +213,8 @@ const TRANSLATIONS = {
         add_epg_source: 'Добавить EPG источник',
         edit_epg_source: 'Редактировать EPG источник',
         label_epg_url: 'URL (.xml.gz / .xml)',
-        epg_url_placeholder: 'http://epg.it999.ru/edem.xml.gz',
 
         // Settings
-        scheduler: 'Планировщик проверок',
-        check_interval: 'Интервал проверки (секунды)',
-        check_timeout: 'Таймаут канала (секунды)',
-        parallel_workers: 'Параллельных потоков',
         playlist_rules: 'Правила формирования плейлиста',
         min_availability: 'Минимальная доступность (%)',
         min_availability_desc: 'Каналы с доступностью ниже этого значения не попадут в плейлист',
@@ -253,7 +233,6 @@ const TRANSLATIONS = {
         label_password_repeat: 'Повторите пароль',
         btn_save_auth: 'Сохранить',
         scheduler_status: 'Состояние планировщика',
-        status_running: 'Проверка...',
         status_waiting: 'Ожидание',
         last: 'Последняя',
         next: 'Следующая',
@@ -262,7 +241,6 @@ const TRANSLATIONS = {
         availability_settings: 'Статистика доступности',
         availability_period: 'Период расчёта (дни)',
         availability_period_desc: 'За сколько дней считать процент доступности канала',
-        btn_save_settings: 'Сохранить',
 
         // Access
         access_stats: 'Статистика подключений',
@@ -300,7 +278,6 @@ const TRANSLATIONS = {
         toast_name_url_required: 'Укажите название и URL',
         toast_error: 'Ошибка',
         toast_playlist_updated: 'Плейлист обновлён:',
-        toast_epg_downloaded: 'EPG источники скачаны',
 
         // Confirm
         confirm_delete_source: 'Удалить источник и все его каналы?',
@@ -313,8 +290,6 @@ const TRANSLATIONS = {
     },
     en: {
         // Header
-        title: 'TANgle',
-        subtitle: 'IPTV checker',
         nav_channels: 'Channels',
         nav_sources: 'Sources',
         nav_settings: 'Settings',
@@ -340,7 +315,6 @@ const TRANSLATIONS = {
         avg_response: 'Avg response',
         btn_check: 'Check now',
         checking: 'Checking...',
-        latest_channels: 'Latest channels',
 
         // Channels
         search_channels: 'Search channels...',
@@ -386,15 +360,10 @@ const TRANSLATIONS = {
         toast_epg_rebuild_done: 'EPG updated',
         col_enabled: 'Enabled',
         col_channels_count: 'Channels',
-        col_checked: 'Checked',
         col_actions: 'Actions',
-        source_status_available: 'Available',
-        source_status_unavailable: 'Unavailable',
-        source_status_unknown: 'Unchecked',
         source_available: 'Available',
         source_unavailable: 'Unavailable',
         source_not_checked: 'Not checked',
-        never_checked: 'Never',
 
         // Source Modal
         add_source: 'Add source',
@@ -418,16 +387,12 @@ const TRANSLATIONS = {
         group_reset: 'Reset edits',
         group_reset_hint: 'Drop manual edits and restore source groups',
         group_reset_override: 'Reset manual edit',
-        group_new_name: 'New group name:',
-        group_merge_target: 'Merge into which group?',
         group_dupes_apply: 'Edit will apply to duplicates',
         group_no_dupes: 'No duplicates in other sources',
         group_has_override: 'has manual edit',
         group_merged: 'Groups merged',
         group_renamed: 'Group renamed',
         group_reset_done: 'Edits reset',
-        group_alias_deleted: 'Merge deleted',
-        group_alias_delete: 'Delete saved merge',
         group_merge_target_hint: 'Final group name — editable',
         group_fuzzy_hint: 'Approximate match, verify before merging',
         group_nothing_to_merge: 'Nothing to merge',
@@ -512,10 +477,6 @@ const TRANSLATIONS = {
         confirm_merge_all: 'Merge all suggested groups?',
         confirm_reset_overrides: 'Reset manual group edits?',
         btn_refresh: 'Refresh',
-        error_playlist_load: 'Failed to load playlist:',
-        error_not_m3u: 'File is not an M3U/M3U8 playlist (no #EXTM3U or #EXTINF tags found)',
-        error_no_channels: 'Playlist contains no channels',
-        error_empty_file: 'File is empty',
         delete_selected: 'Delete selected',
         period_from: 'From',
         period_to: 'To',
@@ -524,6 +485,7 @@ const TRANSLATIONS = {
         label_enabled: 'Enabled',
         btn_cancel: 'Cancel',
         btn_save: 'Save',
+        btn_delete: 'Delete',
         source_name_placeholder: 'e.g. IPTV Org Russian',
         source_url_placeholder: 'https://example.com/playlist.m3u',
         label_source_type: 'Source type',
@@ -540,13 +502,8 @@ const TRANSLATIONS = {
         add_epg_source: 'Add EPG source',
         edit_epg_source: 'Edit EPG source',
         label_epg_url: 'URL (.xml.gz / .xml)',
-        epg_url_placeholder: 'http://epg.it999.ru/edem.xml.gz',
 
         // Settings
-        scheduler: 'Check Scheduler',
-        check_interval: 'Check interval (seconds)',
-        check_timeout: 'Channel timeout (seconds)',
-        parallel_workers: 'Parallel workers',
         playlist_rules: 'Playlist Rules',
         min_availability: 'Minimum availability (%)',
         min_availability_desc: 'Channels below this threshold won\'t be in the playlist',
@@ -565,7 +522,6 @@ const TRANSLATIONS = {
         label_password_repeat: 'Repeat password',
         btn_save_auth: 'Save',
         scheduler_status: 'Scheduler Status',
-        status_running: 'Checking...',
         status_waiting: 'Waiting',
         last: 'Last',
         next: 'Next',
@@ -574,7 +530,6 @@ const TRANSLATIONS = {
         availability_settings: 'Availability Statistics',
         availability_period: 'Calculation period (days)',
         availability_period_desc: 'How many days to calculate channel availability',
-        btn_save_settings: 'Save',
 
         // Access
         access_stats: 'Connection Statistics',
@@ -612,7 +567,6 @@ const TRANSLATIONS = {
         toast_name_url_required: 'Name and URL required',
         toast_error: 'Error',
         toast_playlist_updated: 'Playlist updated:',
-        toast_epg_downloaded: 'EPG sources downloaded',
 
         // Confirm
         confirm_delete_source: 'Delete source and all its channels?',

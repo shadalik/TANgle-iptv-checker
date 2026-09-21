@@ -240,14 +240,45 @@ def require_auth(request: Request):
     return token
 
 
+_index_html_cache = {"key": None, "body": None, "etag": None}
+
+
+def render_index_html():
+    """index.html со ссылкой translations.js?v=<hash> (cache-busting).
+
+    Гарантирует, что браузер не смешает новый HTML со старым translations.js
+    из кэша: версия в ссылке меняется вместе с файлом.
+    """
+    static_dir = os.path.join(os.path.dirname(__file__), "static")
+    html_path = os.path.join(static_dir, "index.html")
+    js_path = os.path.join(static_dir, "translations.js")
+    try:
+        cache_key = (os.path.getmtime(html_path), os.path.getmtime(js_path))
+    except OSError:
+        cache_key = None
+    if cache_key is not None and _index_html_cache["key"] == cache_key:
+        return _index_html_cache["body"], _index_html_cache["etag"]
+
+    with open(html_path, "rb") as f:
+        raw = f.read()
+    try:
+        with open(js_path, "rb") as f:
+            ver = hashlib.sha1(f.read()).hexdigest()[:8]
+        raw = raw.replace(b'src="/static/translations.js"',
+                          f'src="/static/translations.js?v={ver}"'.encode())
+    except OSError:
+        pass
+    etag = '"' + hashlib.sha1(raw).hexdigest() + '"'
+    if cache_key is not None:
+        _index_html_cache.update(key=cache_key, body=raw, etag=etag)
+    return raw, etag
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     if not get_session_token(request):
         return RedirectResponse(url="/login")
-    html_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    with open(html_path, "rb") as f:
-        raw = f.read()
-    etag = '"' + hashlib.sha1(raw).hexdigest() + '"'
+    raw, etag = render_index_html()
     if request.headers.get("if-none-match") == etag:
         return Response(status_code=304, headers={"ETag": etag, "Cache-Control": "no-cache"})
     return HTMLResponse(content=raw, headers={"ETag": etag, "Cache-Control": "no-cache"})
