@@ -566,7 +566,7 @@ def _open_streaming_epg_database(path):
             stop TEXT,
             title TEXT NOT NULL,
             description TEXT,
-            UNIQUE(channel_name, start, title)
+            UNIQUE(channel_name, start)
         )
         """
     )
@@ -615,6 +615,7 @@ def _parse_xmltv_to_database(
     channel_icons = {}
 
     matched_programmes = 0
+    inserted_programmes = 0
 
     # ----------------------------------------------------------------------
     # Pass #1
@@ -799,6 +800,7 @@ def _parse_xmltv_to_database(
 
             # Не держим большой executemany batch.
             if len(pending) >= 5000:
+                before_changes = conn.total_changes
                 conn.executemany(
                     """
                     INSERT OR IGNORE INTO programmes
@@ -817,6 +819,7 @@ def _parse_xmltv_to_database(
 
                 conn.commit()
 
+                inserted_programmes += conn.total_changes - before_changes
                 matched_programmes += len(
                     pending
                 )
@@ -828,6 +831,7 @@ def _parse_xmltv_to_database(
             elem.clear()
 
         if pending:
+            before_changes = conn.total_changes
             conn.executemany(
                 """
                 INSERT OR IGNORE INTO programmes
@@ -846,11 +850,20 @@ def _parse_xmltv_to_database(
 
             conn.commit()
 
+            inserted_programmes += conn.total_changes - before_changes
             matched_programmes += len(
                 pending
             )
 
             pending.clear()
+
+        dropped = matched_programmes - inserted_programmes
+        if dropped > 0:
+            print(
+                f"[epg] {os.path.basename(xml_path)}: "
+                f"dropped {dropped:,} duplicate slots "
+                f"(same channel and start time)"
+            )
 
     except ET.ParseError as e:
         print(
@@ -1227,25 +1240,33 @@ def _write_epg_stream(
             )
 
             written_ids = set()
+            written_channels = 0
+            id_by_name = {}
 
             for row in channel_cursor:
                 channel_name = row[0]
-                channel_id = row[1]
+                channel_id = (row[1] or "").strip()
 
-                if (
-                    not channel_id
-                    or channel_id in written_ids
-                ):
-                    continue
+                if not channel_id:
+                    channel_id = channel_name
 
-                written_ids.add(
-                    channel_id
-                )
+                # Разные каналы из разных источников могут иметь одинаковый id
+                # (например, числовые id совпадают). Делаем id уникальным,
+                # чтобы каждая программа ссылалась на объявленный канал.
+                final_id = channel_id
+                suffix = 2
+                while final_id in written_ids:
+                    final_id = f"{channel_id}#{suffix}"
+                    suffix += 1
+
+                written_ids.add(final_id)
+                id_by_name[channel_name] = final_id
+                written_channels += 1
 
                 channel_element = ET.Element(
                     "channel",
                     {
-                        "id": channel_id
+                        "id": final_id
                     },
                 )
 
@@ -1274,28 +1295,30 @@ def _write_epg_stream(
             cursor = conn.execute(
                 """
                 SELECT
-                    channel_name,
-                    channel_id,
-                    start,
-                    stop,
-                    title,
-                    description
-                FROM programmes
+                    p.channel_name,
+                    p.start,
+                    p.stop,
+                    p.title,
+                    p.description
+                FROM programmes p
                 ORDER BY
-                    channel_name,
-                    start
+                    p.channel_name,
+                    p.start
                 """
             )
 
             for row in cursor:
                 (
                     channel_name,
-                    channel_id,
                     start,
                     stop,
                     title,
                     description,
                 ) = row
+
+                channel_id = id_by_name.get(channel_name)
+                if not channel_id:
+                    continue
 
                 attributes = {
                     "start": start,
@@ -1342,7 +1365,7 @@ def _write_epg_stream(
             destination,
         )
 
-        return True
+        return written_channels
 
     except Exception:
         try:
@@ -1489,10 +1512,13 @@ def merge_from_cache(
             f"[epg] Generating EPG..."
         )
 
-        _write_epg_stream(
+        written_channels = _write_epg_stream(
             conn,
             EPG_PATH,
             len(total_channels),
+        )
+        print(
+            f"[epg] Written channels with programmes: {written_channels}"
         )
 
         # Сжатая версия для клиентов с Accept-Encoding: gzip
@@ -1527,7 +1553,7 @@ def merge_from_cache(
             except Exception as e:
                 print(f"[epg] Error saving icons: {e}")
 
-        return len(total_channels)
+        return written_channels
 
     finally:
         if conn is not None:
@@ -1566,7 +1592,15 @@ def _gzip_epg_locked(src_path, dst_path, compresslevel=6):
         return None
     tmp_path = dst_path + ".tmp"
     try:
-        with open(src_path, "rb") as src, gzip.open(tmp_path, "wb", compresslevel=compresslevel) as dst:
+        # Имя и mtime задаём явно: иначе gzip запишет в заголовок basename
+        # временного файла ("epg.xml.gz.tmp") и архив будет невоспроизводимым.
+        with open(src_path, "rb") as src, open(tmp_path, "wb") as raw, gzip.GzipFile(
+            filename=os.path.basename(src_path),
+            mode="wb",
+            fileobj=raw,
+            compresslevel=compresslevel,
+            mtime=int(os.path.getmtime(src_path)),
+        ) as dst:
             _copy_stream(src, dst)
         os.replace(tmp_path, dst_path)
         print(f"[epg] Gzip saved to {dst_path} ({os.path.getsize(dst_path):,} bytes)")
