@@ -17,9 +17,9 @@ data/
 # EPG cache
 data/epg_cache/
 
-# Generated files
-playlist/*.m3u
-playlist/epg.xml
+# Generated files (runtime output)
+playlist/
+*.tmp
 
 # Old files
 checker.cat

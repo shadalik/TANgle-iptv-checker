@@ -6,14 +6,19 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DB_PATH=/data/iptv.db
+      # Папка и имя по умолчанию; имя меняется в настройках (playlist_filename)
       - PLAYLIST_PATH=/playlist/rus_fixed.m3u
       - EPG_PATH=/playlist/epg.xml
+      # Публичный адрес для ссылок в шапке плейлиста (пусто = из запроса/env)
+      - PUBLIC_BASE_URL=
     volumes:
       - ./data:/data
       - ./playlist:/playlist
     ports:
       - "9239:9239"
     restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9239/api/check_login"]
       interval: 30s

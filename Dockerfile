@@ -3,9 +3,9 @@ FROM python:3.11-alpine
 WORKDIR /app
 
 RUN apk add --no-cache curl && \
-    pip install --no-cache-dir requests fastapi uvicorn[standard]
+    pip install --no-cache-dir requests fastapi uvicorn[standard] python-multipart
 
-COPY database.py checker_core.py epg.py app.py /app/
+COPY database.py checker_core.py epg.py app.py groups.py /app/
 COPY requirements.txt /app/
 COPY static/ /app/static/
 
