@@ -456,7 +456,10 @@
                     </div>
                     <div class="form-group">
                         <label data-t="public_base_url">Публичный адрес сервера</label>
-                        <input type="text" id="set-public-base-url" placeholder="http://your-server:9239">
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                            <input type="text" id="set-public-base-url" placeholder="http://your-server:9239" style="flex:1;min-width:180px;">
+                            <button class="btn btn-secondary btn-small" onclick="useCurrentBaseUrl()" data-t="btn_use_current_url">Использовать текущий адрес</button>
+                        </div>
                         <span style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;" data-t="public_base_url_desc">Для ссылок в шапке плейлиста. Пусто — адрес по умолчанию</span>
                     </div>
                     <div class="form-group">
@@ -1518,6 +1521,24 @@
             availability_period_days: parseInt(document.getElementById('set-availability-period').value),
         })});
         toast(t('toast_settings_saved'));
+    }
+
+    async function useCurrentBaseUrl() {
+        const origin = window.location.origin;
+        if (/^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(origin)) {
+            toast(t('toast_base_url_localhost'), 'error');
+        }
+        try {
+            await api('/api/settings', { method: 'PUT', body: JSON.stringify({ public_base_url: origin }) });
+            document.getElementById('set-public-base-url').value = origin;
+            const res = await api('/api/playlist/generate', { method: 'POST' });
+            document.getElementById('playlist-count').textContent = res.channel_count;
+            toast(`${t('toast_base_url_saved')}: ${origin}`);
+            loadPlaylistInfo();
+        } catch(e) {
+            const msg = e.json ? (await e.json()).detail : e.message;
+            toast(msg || t('toast_error'), 'error');
+        }
     }
 
     async function savePlaylistSettings() {
