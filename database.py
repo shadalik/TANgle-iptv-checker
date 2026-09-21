@@ -48,6 +48,43 @@ def init_db():
             );
         """)
         conn.executescript("""
+            CREATE TABLE IF NOT EXISTS group_aliases (
+                raw TEXT PRIMARY KEY,
+                canonical TEXT NOT NULL,
+                created_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE TABLE IF NOT EXISTS group_overrides (
+                norm_name TEXT PRIMARY KEY,
+                group_title TEXT NOT NULL,
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE TABLE IF NOT EXISTS epg_categories (
+                norm_name TEXT PRIMARY KEY,
+                category TEXT NOT NULL,
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE TABLE IF NOT EXISTS epg_icons (
+                norm_name TEXT PRIMARY KEY,
+                icon_url TEXT NOT NULL,
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE TABLE IF NOT EXISTS playlist_groups (
+                norm_name TEXT PRIMARY KEY,
+                group_title TEXT NOT NULL,
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE TABLE IF NOT EXISTS group_exclusions (
+                mech_name TEXT PRIMARY KEY,
+                group_title TEXT NOT NULL,
+                disabled_ids TEXT DEFAULT '[]',
+                created_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE TABLE IF NOT EXISTS disabled_by_dedup (
+                channel_id INTEGER PRIMARY KEY,
+                created_at REAL DEFAULT (strftime('%s','now'))
+            );
+        """)
+        conn.executescript("""
             CREATE TABLE IF NOT EXISTS epg_sources (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 name TEXT NOT NULL,
@@ -85,7 +122,27 @@ def init_db():
             conn.execute("ALTER TABLE channels ADD COLUMN alive_checks INTEGER DEFAULT 0")
         if "enabled" not in ch_cols:
             conn.execute("ALTER TABLE channels ADD COLUMN enabled INTEGER DEFAULT 1")
+        if "source_group" not in ch_cols:
+            conn.execute("ALTER TABLE channels ADD COLUMN source_group TEXT")
+            # Backfill: для каналов без ручных правок inf_line содержит группу источника
+            try:
+                rows = conn.execute("SELECT id, inf_line FROM channels").fetchall()
+                for r in rows:
+                    inf = r["inf_line"] or ""
+                    m = re.search(r'group-title="([^"]*)"', inf)
+                    if m:
+                        conn.execute("UPDATE channels SET source_group=? WHERE id=?", (m.group(1), r["id"]))
+                    else:
+                        conn.execute("UPDATE channels SET source_group=group_title WHERE id=?", (r["id"],))
+            except Exception as e:
+                print(f"[db] source_group backfill failed: {e}")
         src_cols = [r[1] for r in conn.execute("PRAGMA table_info(sources)").fetchall()]
+        if "source_type" not in src_cols:
+            conn.execute("ALTER TABLE sources ADD COLUMN source_type TEXT DEFAULT 'url'")
+        if "file_path" not in src_cols:
+            conn.execute("ALTER TABLE sources ADD COLUMN file_path TEXT")
+        if "file_name" not in src_cols:
+            conn.execute("ALTER TABLE sources ADD COLUMN file_name TEXT")
         if "is_alive" not in src_cols:
             conn.execute("ALTER TABLE sources ADD COLUMN is_alive INTEGER DEFAULT 0")
         if "channel_count" not in src_cols:
@@ -94,6 +151,29 @@ def init_db():
             conn.execute("ALTER TABLE sources ADD COLUMN last_check REAL")
         if "response_time_ms" not in src_cols:
             conn.execute("ALTER TABLE sources ADD COLUMN response_time_ms REAL")
+        alias_cols = [r[1] for r in conn.execute("PRAGMA table_info(group_aliases)").fetchall()]
+        if "raw_display" not in alias_cols:
+            conn.execute("ALTER TABLE group_aliases ADD COLUMN raw_display TEXT")
+            # Backfill исходного написания из source_group каналов
+            try:
+                src_groups = conn.execute("SELECT DISTINCT source_group FROM channels").fetchall()
+                seen = {}
+                for r in src_groups:
+                    sg = r["source_group"] or ""
+                    key = sg.strip().lower().replace("ё", "е")
+                    if key and key not in seen:
+                        seen[key] = sg.strip()
+                for key, disp in seen.items():
+                    conn.execute("UPDATE group_aliases SET raw_display=? WHERE raw=? AND (raw_display IS NULL OR raw_display='')", (disp, key))
+            except Exception as e:
+                print(f"[db] raw_display backfill failed: {e}")
+        # Чистка бессмысленных алиасов вида "релакс -> Релакс"
+        try:
+            for r in conn.execute("SELECT raw, canonical FROM group_aliases").fetchall():
+                if (r["raw"] or "").strip().lower().replace("ё", "е") == (r["canonical"] or "").strip().lower().replace("ё", "е"):
+                    conn.execute("DELETE FROM group_aliases WHERE raw=?", (r["raw"],))
+        except Exception as e:
+            print(f"[db] no-op alias cleanup failed: {e}")
         row = conn.execute("SELECT value FROM settings WHERE key='check_interval'").fetchone()
         if not row:
             conn.execute("INSERT INTO settings (key, value) VALUES ('check_interval', '3600')")
@@ -108,6 +188,14 @@ def init_db():
             conn.execute("INSERT INTO settings (key, value) VALUES ('epg_update_interval', '86400')")
             conn.execute("INSERT INTO settings (key, value) VALUES ('availability_period_days', '7')")
             conn.execute("INSERT INTO settings (key, value) VALUES ('min_availability', '0')")
+            conn.execute("INSERT INTO settings (key, value) VALUES ('dedup_strategy', 'availability')")
+            conn.execute("INSERT INTO settings (key, value) VALUES ('auto_group_synonyms', '1')")
+        else:
+            # доустановка новых настроек на существующих БД
+            if not conn.execute("SELECT value FROM settings WHERE key='dedup_strategy'").fetchone():
+                conn.execute("INSERT INTO settings (key, value) VALUES ('dedup_strategy', 'availability')")
+            if not conn.execute("SELECT value FROM settings WHERE key='auto_group_synonyms'").fetchone():
+                conn.execute("INSERT INTO settings (key, value) VALUES ('auto_group_synonyms', '1')")
         epg_count = conn.execute("SELECT COUNT(*) as cnt FROM epg_sources").fetchone()["cnt"]
         if epg_count == 0:
             conn.execute("INSERT INTO epg_sources (name, url, enabled) VALUES ('IPTVX One', 'http://iptvx.one/epg/epg_lite.xml.gz', 1)")
@@ -145,13 +233,21 @@ def set_setting(key, value):
         )
 
 
-def add_source(name, url, enabled=True):
+def add_source(name, url, enabled=True, source_type="url", file_path=None, file_name=None):
     with get_conn() as conn:
         cur = conn.execute(
-            "INSERT INTO sources (name, url, enabled) VALUES (?, ?, ?)",
-            (name, url, 1 if enabled else 0),
+            "INSERT INTO sources (name, url, enabled, source_type, file_path, file_name) VALUES (?, ?, ?, ?, ?, ?)",
+            (name, url, 1 if enabled else 0, source_type, file_path, file_name),
         )
         return cur.lastrowid
+
+
+def set_source_file(source_id, file_path, file_name):
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE sources SET source_type='file', file_path=?, file_name=?, url=? WHERE id=?",
+            (file_path, file_name, f"file://{file_name}", source_id),
+        )
 
 
 def update_source(source_id, name=None, url=None, enabled=None):
@@ -181,8 +277,12 @@ def update_source_status(source_id, is_alive, channel_count, response_time_ms=No
 
 def delete_source(source_id):
     with get_conn() as conn:
+        row = conn.execute("SELECT file_path, source_type FROM sources WHERE id=?", (source_id,)).fetchone()
         conn.execute("DELETE FROM channels WHERE source_id=?", (source_id,))
         conn.execute("DELETE FROM sources WHERE id=?", (source_id,))
+        if row:
+            return dict(row)
+        return None
 
 
 def get_sources(enabled_only=False):
@@ -194,23 +294,59 @@ def get_sources(enabled_only=False):
         return [dict(r) for r in conn.execute(q).fetchall()]
 
 
-def upsert_channel(source_id, name, url, inf_line, group_title):
+def upsert_channel(source_id, name, url, inf_line, group_title, source_group=None):
+    if source_group is None:
+        source_group = group_title
     with get_conn() as conn:
         existing = conn.execute(
             "SELECT id FROM channels WHERE source_id=? AND url=?", (source_id, url)
         ).fetchone()
         if existing:
             conn.execute(
-                "UPDATE channels SET name=?, inf_line=? WHERE id=?",
-                (name, inf_line, existing["id"]),
+                "UPDATE channels SET name=?, inf_line=?, group_title=?, source_group=? WHERE id=?",
+                (name, inf_line, group_title, source_group, existing["id"]),
             )
             return existing["id"]
         else:
             cur = conn.execute(
-                "INSERT INTO channels (source_id, name, url, inf_line, group_title) VALUES (?, ?, ?, ?, ?)",
-                (source_id, name, url, inf_line, group_title),
+                "INSERT INTO channels (source_id, name, url, inf_line, group_title, source_group) VALUES (?, ?, ?, ?, ?, ?)",
+                (source_id, name, url, inf_line, group_title, source_group),
             )
             return cur.lastrowid
+
+
+def upsert_channels_bulk(source_id, rows):
+    """Пакетный upsert каналов источника в одной транзакции.
+
+    rows: список dict с ключами name, url, inf_line, group_title, source_group.
+    Возвращает {url: channel_id}.
+    """
+    if not rows:
+        return {}
+    result = {}
+    with get_conn() as conn:
+        existing = {
+            r["url"]: r["id"]
+            for r in conn.execute("SELECT id, url FROM channels WHERE source_id=?", (source_id,)).fetchall()
+        }
+        inserts = []
+        for ch in rows:
+            cid = existing.get(ch["url"])
+            if cid:
+                conn.execute(
+                    "UPDATE channels SET name=?, inf_line=?, group_title=?, source_group=? WHERE id=?",
+                    (ch["name"], ch["inf_line"], ch["group_title"], ch["source_group"], cid),
+                )
+                result[ch["url"]] = cid
+            else:
+                inserts.append(ch)
+        for ch in inserts:
+            cur = conn.execute(
+                "INSERT INTO channels (source_id, name, url, inf_line, group_title, source_group) VALUES (?, ?, ?, ?, ?, ?)",
+                (source_id, ch["name"], ch["url"], ch["inf_line"], ch["group_title"], ch["source_group"]),
+            )
+            result[ch["url"]] = cur.lastrowid
+        return result
 
 
 def update_channel_status(channel_id, is_alive, response_time_ms=None):
@@ -227,6 +363,19 @@ def toggle_channel(channel_id, enabled):
         conn.execute("UPDATE channels SET enabled=? WHERE id=?", (1 if enabled else 0, channel_id))
 
 
+def set_channels_enabled(channel_ids, enabled):
+    ids = list(channel_ids or [])
+    if not ids:
+        return 0
+    ph = ",".join(["?"] * len(ids))
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE channels SET enabled=? WHERE id IN ({ph})",
+            [1 if enabled else 0] + ids,
+        )
+        return cur.rowcount
+
+
 def update_channel_group(channel_id, group_title):
     with get_conn() as conn:
         conn.execute("UPDATE channels SET group_title=? WHERE id=?", (group_title, channel_id))
@@ -236,6 +385,303 @@ def update_channel_group(channel_id, group_title):
             if 'group-title' not in new_inf:
                 new_inf = new_inf.replace("#EXTINF:", f'#EXTINF: group-title="{group_title}" ', 1)
             conn.execute("UPDATE channels SET inf_line=? WHERE id=?", (new_inf, channel_id))
+
+
+# ---------------------------------------------------------------------------
+# Groups: aliases, manual overrides, EPG categories, playlist snapshot
+#
+# Приоритет определения группы канала:
+#   1. group_overrides (ручная правка по нормализованному имени)
+#   2. group_aliases (подтверждённые пользователем слияния/переименования)
+#   3. group-title из источника плейлиста
+#   4. категория EPG (fallback, когда группа пустая или "Другое")
+# ---------------------------------------------------------------------------
+
+def get_group_aliases():
+    with get_conn() as conn:
+        return {r["raw"]: r["canonical"]
+                for r in conn.execute("SELECT raw, canonical FROM group_aliases").fetchall()}
+
+
+def get_alias_list():
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT raw, canonical FROM group_aliases ORDER BY raw").fetchall()]
+
+
+def set_group_alias(raw, canonical, raw_display=None):
+    with get_conn() as conn:
+        if raw_display:
+            conn.execute(
+                "INSERT INTO group_aliases (raw, canonical, raw_display) VALUES (?, ?, ?) "
+                "ON CONFLICT(raw) DO UPDATE SET canonical=excluded.canonical, raw_display=excluded.raw_display",
+                (raw, canonical, raw_display),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO group_aliases (raw, canonical) VALUES (?, ?) "
+                "ON CONFLICT(raw) DO UPDATE SET canonical=excluded.canonical",
+                (raw, canonical),
+            )
+
+
+def delete_group_alias(raw):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM group_aliases WHERE raw=?", (raw,))
+
+
+def get_alias_rows():
+    """Сырые строки алиасов с исходным написанием и датой."""
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT raw, COALESCE(NULLIF(raw_display,''), raw) AS display, canonical, created_at "
+            "FROM group_aliases ORDER BY created_at").fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# Исключение групп из плейлиста
+# ---------------------------------------------------------------------------
+
+def get_excluded_groups():
+    with get_conn() as conn:
+        return {r["mech_name"]: dict(r) for r in conn.execute(
+            "SELECT * FROM group_exclusions").fetchall()}
+
+
+def set_group_exclusion(mech_name, group_title, disabled_ids=None):
+    import json as _json
+    ids = list(disabled_ids or [])
+    with get_conn() as conn:
+        row = conn.execute("SELECT disabled_ids FROM group_exclusions WHERE mech_name=?",
+                           (mech_name,)).fetchone()
+        if row:
+            try:
+                prev = set(_json.loads(row["disabled_ids"] or "[]"))
+            except Exception:
+                prev = set()
+            ids = sorted(prev | set(ids))
+        conn.execute(
+            "INSERT INTO group_exclusions (mech_name, group_title, disabled_ids) VALUES (?, ?, ?) "
+            "ON CONFLICT(mech_name) DO UPDATE SET group_title=excluded.group_title, disabled_ids=excluded.disabled_ids",
+            (mech_name, group_title, _json.dumps(ids)),
+        )
+        return ids
+
+
+def remove_group_exclusion(mech_name):
+    import json as _json
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM group_exclusions WHERE mech_name=?",
+                           (mech_name,)).fetchone()
+        conn.execute("DELETE FROM group_exclusions WHERE mech_name=?", (mech_name,))
+        if not row:
+            return None
+        d = dict(row)
+        try:
+            d["disabled_ids"] = _json.loads(d.get("disabled_ids") or "[]")
+        except Exception:
+            d["disabled_ids"] = []
+        return d
+
+
+# ---------------------------------------------------------------------------
+# Учёт каналов, отключённых автоотсевом дублей (для точного возврата)
+# ---------------------------------------------------------------------------
+
+def record_dedup_disabled(channel_ids):
+    ids = list(channel_ids or [])
+    if not ids:
+        return 0
+    with get_conn() as conn:
+        conn.executemany(
+            "INSERT OR IGNORE INTO disabled_by_dedup (channel_id) VALUES (?)",
+            [(i,) for i in ids],
+        )
+        return len(ids)
+
+
+def unrecord_dedup_disabled(channel_ids=None):
+    with get_conn() as conn:
+        if channel_ids is None:
+            cur = conn.execute("DELETE FROM disabled_by_dedup")
+        else:
+            ids = list(channel_ids)
+            if not ids:
+                return 0
+            ph = ",".join(["?"] * len(ids))
+            cur = conn.execute(f"DELETE FROM disabled_by_dedup WHERE channel_id IN ({ph})", ids)
+        return cur.rowcount
+
+
+def get_dedup_disabled():
+    with get_conn() as conn:
+        return {r["channel_id"] for r in conn.execute(
+            "SELECT channel_id FROM disabled_by_dedup").fetchall()}
+
+
+def bulk_move_group(old_groups, target):
+    """Переместить все каналы из old_groups в target. Возвращает число каналов."""
+    if not old_groups:
+        return 0
+    ph = ",".join(["?"] * len(old_groups))
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE channels SET group_title=? WHERE group_title IN ({ph})",
+            [target] + list(old_groups),
+        )
+        moved = cur.rowcount
+        # Ручные правки следуют за слиянием: override со старым именем -> target
+        conn.execute(
+            f"UPDATE group_overrides SET group_title=?, updated_at=strftime('%s','now') WHERE group_title IN ({ph})",
+            [target] + list(old_groups),
+        )
+        conn.execute(
+            f"UPDATE playlist_groups SET group_title=?, updated_at=strftime('%s','now') WHERE group_title IN ({ph})",
+            [target] + list(old_groups),
+        )
+        # Запомненные объединения тоже следуют за переименованием:
+        # алиасы, указывавшие на старые имена, перенаправляются на target.
+        # Иначе при следующем импорте старое имя группы воскреснет.
+        # Сравнение - на Python-стороне: SQLite lower() не работает с кириллицей.
+        def _k(s):
+            return str(s or "").strip().lower().replace("ё", "е")
+        old_set = {_k(g) for g in old_groups}
+        stale = [r["raw"] for r in conn.execute(
+            "SELECT raw, canonical FROM group_aliases").fetchall()
+            if _k(r["canonical"]) in old_set]
+        if stale:
+            sph = ",".join(["?"] * len(stale))
+            conn.execute(
+                f"UPDATE group_aliases SET canonical=? WHERE raw IN ({sph})",
+                [target] + stale,
+            )
+        # Исключения групп тоже следуют за переименованием/слиянием
+        import json as _json
+        excl_rows = [r for r in conn.execute(
+            "SELECT mech_name, disabled_ids FROM group_exclusions").fetchall()
+            if r["mech_name"] in old_set]
+        if excl_rows:
+            merged = set()
+            for r in excl_rows:
+                try:
+                    merged |= set(_json.loads(r["disabled_ids"] or "[]"))
+                except Exception:
+                    pass
+                conn.execute("DELETE FROM group_exclusions WHERE mech_name=?", (r["mech_name"],))
+            new_mech = _k(target)
+            prev = conn.execute("SELECT disabled_ids FROM group_exclusions WHERE mech_name=?",
+                                (new_mech,)).fetchone()
+            if prev:
+                try:
+                    merged |= set(_json.loads(prev["disabled_ids"] or "[]"))
+                except Exception:
+                    pass
+            conn.execute(
+                "INSERT INTO group_exclusions (mech_name, group_title, disabled_ids) VALUES (?, ?, ?) "
+                "ON CONFLICT(mech_name) DO UPDATE SET group_title=excluded.group_title, disabled_ids=excluded.disabled_ids",
+                (new_mech, target, _json.dumps(sorted(merged))),
+            )
+        return moved
+
+
+def get_group_overrides():
+    with get_conn() as conn:
+        return {r["norm_name"]: r["group_title"]
+                for r in conn.execute("SELECT norm_name, group_title FROM group_overrides").fetchall()}
+
+
+def set_group_override(norm_name, group_title):
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO group_overrides (norm_name, group_title, updated_at) "
+            "VALUES (?, ?, strftime('%s','now'))",
+            (norm_name, group_title),
+        )
+
+
+def delete_group_overrides(norm_names=None):
+    """Удалить override'ы. norm_names=None -> удалить все."""
+    with get_conn() as conn:
+        if norm_names is None:
+            cur = conn.execute("DELETE FROM group_overrides")
+        else:
+            norms = list(norm_names)
+            if not norms:
+                return 0
+            ph = ",".join(["?"] * len(norms))
+            cur = conn.execute(f"DELETE FROM group_overrides WHERE norm_name IN ({ph})", norms)
+        return cur.rowcount
+
+
+def update_channels_group_by_ids(channel_ids, group_title):
+    ids = list(channel_ids)
+    if not ids:
+        return 0
+    ph = ",".join(["?"] * len(ids))
+    with get_conn() as conn:
+        cur = conn.execute(
+            f"UPDATE channels SET group_title=? WHERE id IN ({ph})",
+            [group_title] + ids,
+        )
+        return cur.rowcount
+
+
+def get_group_stats():
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(
+            "SELECT group_title AS name, COUNT(*) AS channels, "
+            "SUM(CASE WHEN is_alive=1 THEN 1 ELSE 0 END) AS alive, "
+            "SUM(CASE WHEN enabled=1 THEN 1 ELSE 0 END) AS enabled "
+            "FROM channels GROUP BY group_title ORDER BY channels DESC"
+        ).fetchall()]
+
+
+def save_epg_categories(mapping):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM epg_categories")
+        conn.executemany(
+            "INSERT INTO epg_categories (norm_name, category, updated_at) "
+            "VALUES (?, ?, strftime('%s','now'))",
+            [(k, v) for k, v in mapping.items() if k and v],
+        )
+
+
+def get_epg_categories():
+    with get_conn() as conn:
+        return {r["norm_name"]: r["category"]
+                for r in conn.execute("SELECT norm_name, category FROM epg_categories").fetchall()}
+
+
+def save_epg_icons(mapping):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM epg_icons")
+        conn.executemany(
+            "INSERT INTO epg_icons (norm_name, icon_url, updated_at) "
+            "VALUES (?, ?, strftime('%s','now'))",
+            [(k, v) for k, v in mapping.items() if k and v],
+        )
+
+
+def get_epg_icons():
+    with get_conn() as conn:
+        return {r["norm_name"]: r["icon_url"]
+                for r in conn.execute("SELECT norm_name, icon_url FROM epg_icons").fetchall()}
+
+
+def save_playlist_groups(mapping):
+    with get_conn() as conn:
+        conn.execute("DELETE FROM playlist_groups")
+        conn.executemany(
+            "INSERT INTO playlist_groups (norm_name, group_title, updated_at) "
+            "VALUES (?, ?, strftime('%s','now'))",
+            [(k, v) for k, v in mapping.items() if k and v],
+        )
+
+
+def get_playlist_groups():
+    with get_conn() as conn:
+        return {r["norm_name"]: r["group_title"]
+                for r in conn.execute("SELECT norm_name, group_title FROM playlist_groups").fetchall()}
 
 
 def delete_stale_channels(source_id, valid_urls):
@@ -250,9 +696,16 @@ def delete_stale_channels(source_id, valid_urls):
             conn.execute("DELETE FROM channels WHERE source_id=?", (source_id,))
 
 
-def get_channels(source_id=None, alive_only=False):
+CHANNEL_LIGHT_COLUMNS = (
+    "c.id, c.source_id, c.name, c.group_title, c.enabled, c.is_alive, "
+    "c.response_time_ms, c.total_checks, c.alive_checks, c.last_check, c.url"
+)
+
+
+def get_channels(source_id=None, alive_only=False, light=False):
     with get_conn() as conn:
-        q = "SELECT c.*, s.name as source_name FROM channels c LEFT JOIN sources s ON c.source_id=s.id"
+        cols = CHANNEL_LIGHT_COLUMNS if light else "c.*"
+        q = f"SELECT {cols}, s.name as source_name FROM channels c LEFT JOIN sources s ON c.source_id=s.id"
         conditions, params = [], []
         if source_id:
             conditions.append("c.source_id=?")

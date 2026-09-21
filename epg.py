@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 
 import gzip
+import hashlib
 import os
 import re
 import shutil
 import sqlite3
+import threading
 import time
 import zipfile
 import xml.etree.ElementTree as ET
+from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 import requests
@@ -23,6 +26,14 @@ HEADERS = {
 
 EPG_PATH = os.environ.get("EPG_PATH", "/playlist/epg.xml")
 EPG_CACHE_DIR = os.environ.get("EPG_CACHE_DIR", "/data/epg_cache")
+PLAYLIST_DIR = os.path.dirname(os.environ.get("PLAYLIST_PATH", "/playlist/rus_fixed.m3u")) or "/playlist"
+DEFAULT_PLAYLIST_FILENAME = os.path.basename(os.environ.get("PLAYLIST_PATH", "/playlist/rus_fixed.m3u")) or "rus_fixed.m3u"
+
+
+def _playlist_path():
+    """Путь к текущему плейлисту (имя настраивается в БД)."""
+    name = (db.get_setting("playlist_filename", DEFAULT_PLAYLIST_FILENAME) or "").strip()
+    return os.path.join(PLAYLIST_DIR, name or DEFAULT_PLAYLIST_FILENAME)
 
 # Количество одновременных загрузок.
 # RAM практически не увеличивается, так как данные сразу пишутся на диск.
@@ -89,6 +100,31 @@ def _copy_stream(src, dst):
             break
 
         dst.write(chunk)
+
+
+def cleanup_cache_temp(max_age_seconds=6 * 3600):
+    """Удалить временные хвосты загрузок из кэша EPG.
+
+    `.download` — сжатые файлы, которые раньше не удалялись после успешной
+    распаковки; `*.tmp*` — недокачанные/осиротевшие файлы.
+    """
+    if not os.path.isdir(EPG_CACHE_DIR):
+        return 0
+    now = time.time()
+    removed = 0
+    for name in os.listdir(EPG_CACHE_DIR):
+        if not (name.endswith(".download") or ".tmp" in name):
+            continue
+        path = os.path.join(EPG_CACHE_DIR, name)
+        try:
+            if name.endswith(".download") or now - os.path.getmtime(path) > max_age_seconds:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            pass
+    if removed:
+        print(f"[epg] Cleaned {removed} temp cache files")
+    return removed
 
 
 # ---------------------------------------------------------------------------
@@ -290,6 +326,14 @@ def download_epg_source(url, destination=None):
         if final_size == 0:
             raise ValueError("Resulting XML file is empty")
 
+        # Удаляем сжатый временный файл: при ошибке его чистит except,
+        # но при успешной распаковке он раньше оставался на диске.
+        if os.path.exists(compressed_path):
+            try:
+                os.remove(compressed_path)
+            except OSError:
+                pass
+
         print(
             f"[epg] Downloaded {url}: "
             f"{final_size:,} bytes"
@@ -440,6 +484,20 @@ def _get_display_name(channel_element):
     return ""
 
 
+def _get_icon_src(channel_element):
+    """Получить src первого <icon> из <channel> (для логотипов каналов)."""
+    for child in channel_element:
+        tag = child.tag
+
+        if isinstance(tag, str) and tag.endswith("icon"):
+            src = (child.get("src") or "").strip()
+
+            if src:
+                return src
+
+    return ""
+
+
 def _get_child_text(element, wanted_name):
     """
     Найти текст дочернего XML элемента.
@@ -554,6 +612,7 @@ def _parse_xmltv_to_database(
 
     matched_channels = set()
     channel_ids = {}
+    channel_icons = {}
 
     matched_programmes = 0
 
@@ -572,51 +631,61 @@ def _parse_xmltv_to_database(
         for event, elem in context:
             tag = _strip_namespace(elem.tag)
 
-            if tag != "channel":
-                continue
+            if tag == "channel":
+                channel_id = (
+                    elem.get("id", "")
+                    or ""
+                ).strip()
 
-            channel_id = (
-                elem.get("id", "")
-                or ""
-            ).strip()
+                display_name = _get_display_name(
+                    elem
+                )
 
-            display_name = _get_display_name(
-                elem
-            )
+                norm_name = normalize_name(
+                    display_name
+                )
 
-            norm_name = normalize_name(
-                display_name
-            )
+                if (
+                    channel_id
+                    and norm_name
+                    and norm_name in playlist_channel_names
+                ):
+                    matched_channels.add(norm_name)
 
-            if (
-                channel_id
-                and norm_name
-                and norm_name in playlist_channel_names
-            ):
-                matched_channels.add(norm_name)
+                    # Важный момент:
+                    # сохраняем ID первого найденного источника,
+                    # как делал старый epg.py.
+                    if norm_name not in channel_ids:
+                        channel_ids[norm_name] = channel_id
 
-                # Важный момент:
-                # сохраняем ID первого найденного источника,
-                # как делал старый epg.py.
-                if norm_name not in channel_ids:
-                    channel_ids[norm_name] = channel_id
+                    # Логотип канала из EPG (первый у канала).
+                    if norm_name not in channel_icons:
+                        icon = _get_icon_src(elem)
+                        if icon:
+                            channel_icons[norm_name] = icon
 
-            # Освобождаем XML element.
-            elem.clear()
+                # Дочерние элементы (display-name, icon) нужны до этой очистки.
+                elem.clear()
+
+            elif tag == "programme":
+                # В первом проходе программы не нужны, но без очистки
+                # дерево всего XML накапливается в RAM. Дочерние
+                # элементы освобождаются вместе с родителем.
+                elem.clear()
 
     except ET.ParseError as e:
         print(
             f"[epg] XML parse error in "
             f"{xml_path}: {e}"
         )
-        return set(), 0
+        return set(), 0, {}, {}
 
     except Exception as e:
         print(
             f"[epg] Error parsing channels "
             f"{xml_path}: {e}"
         )
-        return set(), 0
+        return set(), 0, {}, {}
 
     # ----------------------------------------------------------------------
     # Сохраняем channel ID.
@@ -650,10 +719,25 @@ def _parse_xmltv_to_database(
 
         pending = []
 
+        # Доминирующая категория передач для каждого сматченного канала.
+        # Только для group-fallback (память: каналы x несколько категорий).
+        category_votes = defaultdict(Counter)
+
+        # Обратное отображение channel_id -> нормализованное имя.
+        # Строим один раз: иначе на каждой программе шёл линейный
+        # перебор channel_ids (квадратичная сложность).
+        id_to_name = {}
+        for name, cid in channel_ids.items():
+            id_to_name.setdefault(cid, name)
+
         for event, elem in context:
             tag = _strip_namespace(elem.tag)
 
             if tag != "programme":
+                # Каналы в этом проходе не нужны; programme очищаются
+                # ниже после извлечения title/desc/category.
+                if tag == "channel":
+                    elem.clear()
                 continue
 
             channel_id = (
@@ -661,21 +745,7 @@ def _parse_xmltv_to_database(
                 or ""
             ).strip()
 
-            norm_name = None
-
-            # channel_id -> нормализованное имя.
-            #
-            # Если channel IDs огромные и отличаются между источниками,
-            # читаем соответствующий channel из базы через mapping.
-            #
-            # Для этого создаём mapping для текущего файла.
-            if channel_id:
-                # Первый проход сохранил channel IDs по имени.
-                # Создаём обратное отображение при необходимости.
-                for name, cid in channel_ids.items():
-                    if cid == channel_id:
-                        norm_name = name
-                        break
+            norm_name = id_to_name.get(channel_id) if channel_id else None
 
             if (
                 not norm_name
@@ -708,6 +778,14 @@ def _parse_xmltv_to_database(
                 elem.clear()
                 continue
 
+            category = _get_child_text(
+                elem,
+                "category",
+            ).strip()
+
+            if category:
+                category_votes[norm_name][category] += 1
+
             pending.append(
                 (
                     norm_name,
@@ -720,7 +798,7 @@ def _parse_xmltv_to_database(
             )
 
             # Не держим большой executemany batch.
-            if len(pending) >= 1000:
+            if len(pending) >= 5000:
                 conn.executemany(
                     """
                     INSERT OR IGNORE INTO programmes
@@ -786,9 +864,17 @@ def _parse_xmltv_to_database(
             f"{xml_path}: {e}"
         )
 
+    dominant_categories = {
+        name: votes.most_common(1)[0][0]
+        for name, votes in category_votes.items()
+        if votes
+    }
+
     return (
         matched_channels,
         matched_programmes,
+        dominant_categories,
+        channel_icons,
     )
 
 
@@ -1306,6 +1392,8 @@ def merge_from_cache(
         )
 
         total_channels = set()
+        category_sources = defaultdict(Counter)
+        icon_sources = {}
 
         for source in epg_sources_data:
             cache = _cache_path(
@@ -1324,18 +1412,27 @@ def merge_from_cache(
                     f"[epg] Parsing "
                     f"{source['name']}..."
                 )
+                _t0 = time.time()
 
                 before = conn.execute(
                     "SELECT COUNT(*) FROM programmes"
                 ).fetchone()[0]
 
-                matched_channels, _ = (
+                matched_channels, _, file_categories, file_icons = (
                     _parse_xmltv_to_database(
                         cache,
                         playlist_channel_names,
                         conn,
                     )
                 )
+
+                for norm_name, icon in file_icons.items():
+                    if icon:
+                        icon_sources.setdefault(norm_name, icon)
+
+                for norm_name, category in file_categories.items():
+                    if category:
+                        category_sources[norm_name][category] += 1
 
                 after = conn.execute(
                     "SELECT COUNT(*) FROM programmes"
@@ -1358,7 +1455,8 @@ def merge_from_cache(
                     f"[epg] {source['name']}: "
                     f"{len(matched_channels)} "
                     f"channels matched, "
-                    f"{new_programmes:,} new programmes"
+                    f"{new_programmes:,} new programmes "
+                    f"in {time.time() - _t0:.1f}s"
                 )
 
             except Exception as e:
@@ -1397,6 +1495,38 @@ def merge_from_cache(
             len(total_channels),
         )
 
+        # Сжатая версия для клиентов с Accept-Encoding: gzip
+        # (одно сжатие на сборку, дальше отдаётся готовый файл).
+        gzip_epg_file()
+
+        # Доминирующие категории передач -> fallback для групп каналов.
+        # Сохраняем сырые категории; маппинг в группы - на этапе resolve.
+        try:
+            dominant = {
+                norm_name: votes.most_common(1)[0][0]
+                for norm_name, votes in category_sources.items()
+                if votes
+            }
+            db.save_epg_categories(dominant)
+            print(
+                f"[epg] Saved {len(dominant)} channel categories "
+                f"for group fallback"
+            )
+        except Exception as e:
+            print(f"[epg] Error saving categories: {e}")
+
+        # Логотипы каналов из EPG -> дозаполнение tvg-logo в плейлисте.
+        # Не затираем прежние иконки, если в этот раз их не собрали.
+        if icon_sources:
+            try:
+                db.save_epg_icons(icon_sources)
+                print(
+                    f"[epg] Saved {len(icon_sources)} channel icons "
+                    f"for playlist logos"
+                )
+            except Exception as e:
+                print(f"[epg] Error saving icons: {e}")
+
         return len(total_channels)
 
     finally:
@@ -1426,6 +1556,59 @@ def merge_from_cache(
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
+_GZIP_LOCK = threading.Lock()
+
+
+def _gzip_epg_locked(src_path, dst_path, compresslevel=6):
+    """Потоково сжать готовый epg.xml в epg.xml.gz (без загрузки в RAM)."""
+    if not os.path.exists(src_path):
+        return None
+    tmp_path = dst_path + ".tmp"
+    try:
+        with open(src_path, "rb") as src, gzip.open(tmp_path, "wb", compresslevel=compresslevel) as dst:
+            _copy_stream(src, dst)
+        os.replace(tmp_path, dst_path)
+        print(f"[epg] Gzip saved to {dst_path} ({os.path.getsize(dst_path):,} bytes)")
+        return dst_path
+    except Exception as e:
+        print(f"[epg] Error gzipping {src_path}: {e}")
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except OSError:
+            pass
+        return None
+
+
+def gzip_epg_file(src_path=None, dst_path=None, compresslevel=6):
+    """Сжать EPG. Блокировка защищает от одновременного сжатия
+    (сборка EPG + старт приложения + запрос клиента)."""
+    src = src_path or EPG_PATH
+    dst = dst_path or (src + ".gz")
+    with _GZIP_LOCK:
+        return _gzip_epg_locked(src, dst, compresslevel)
+
+
+def ensure_epg_gzip():
+    """Достроить epg.xml.gz, если он отсутствует или старше epg.xml."""
+    gz = EPG_PATH + ".gz"
+    if not os.path.exists(EPG_PATH):
+        return None
+
+    def _fresh():
+        try:
+            return os.path.exists(gz) and os.path.getmtime(gz) >= os.path.getmtime(EPG_PATH)
+        except OSError:
+            return False
+
+    if _fresh():
+        return gz
+    with _GZIP_LOCK:
+        if _fresh():
+            return gz
+        return _gzip_epg_locked(EPG_PATH, gz)
+
 
 def write_epg_file(xml_content):
     """
@@ -1461,6 +1644,31 @@ def write_epg_file(xml_content):
         EPG_PATH,
     )
 
+    # Сразу готовим сжатую версию (отдаётся клиентам с Accept-Encoding: gzip).
+    gzip_epg_file()
+
+
+def validate_source_file(path, limit_channels=25):
+    """Потоковая проверка XMLTV-файла: считает каналы, не загружая XML в RAM.
+
+    Возвращает (channels_found, error). Используется при добавлении
+    EPG-источника вместо parse_xmltv(), который держал весь файл в памяти.
+    """
+    count = 0
+    try:
+        for event, elem in ET.iterparse(path, events=("end",)):
+            tag = _strip_namespace(elem.tag)
+            if tag == "channel":
+                count += 1
+            elem.clear()
+            if count >= limit_channels:
+                break
+    except ET.ParseError as e:
+        return 0, f"XML parse error: {e}"
+    except Exception as e:
+        return 0, str(e)[:200]
+    return count, None
+
 
 def download_epg_sources():
     """
@@ -1491,7 +1699,7 @@ def download_epg_sources():
     )
 
 
-def update_epg():
+def update_epg(force=False):
     """
     Полное обновление EPG.
 
@@ -1504,6 +1712,10 @@ def update_epg():
         5. Сохранить только нужные каналы.
         6. Дедуплицировать через SQLite.
         7. Потоково создать итоговый epg.xml.
+
+    Пересборка выполняется только если что-то изменилось
+    (кэши, список каналов плейлиста) или истёк страховочный интервал.
+    force=True - принудительная пересборка.
 
     В RAM больше не находится весь EPG.
     """
@@ -1522,7 +1734,82 @@ def update_epg():
             '<tv/>'
         )
 
-        return
+        db.set_setting("epg_channel_count", "0")
+        return 0
+
+    channel_names = build_channel_set(
+        _playlist_path()
+    )
+
+    if not channel_names:
+        print(
+            "[epg] No channels in playlist"
+        )
+
+        write_epg_file(
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            '<tv/>'
+        )
+
+        db.set_setting("epg_channel_count", "0")
+        return 0
+
+    # ----------------------------------------------------------------------
+    # Нужна ли пересборка вообще?
+    # ----------------------------------------------------------------------
+
+    fingerprint = hashlib.sha1(
+        "\n".join(sorted(channel_names)).encode("utf-8")
+    ).hexdigest()
+
+    last_build = float(
+        db.get_setting("epg_last_build", "0") or 0
+    )
+
+    stored_hash = db.get_setting("epg_playlist_hash", "")
+
+    stale_sources = [
+        s for s in epg_sources
+        if _cache_age_hours(s["id"]) > 23
+    ]
+
+    cache_newer = False
+    for s in epg_sources:
+        path = _cache_path(s["id"])
+        try:
+            if os.path.exists(path) and os.path.getmtime(path) > last_build:
+                cache_newer = True
+                break
+        except OSError:
+            pass
+
+    rebuild_interval = int(
+        db.get_setting("epg_update_interval", "86400")
+    )
+    interval_elapsed = (
+        (time.time() - last_build) >= rebuild_interval
+    )
+
+    if (
+        not force
+        and not stale_sources
+        and not cache_newer
+        and fingerprint == stored_hash
+        and not interval_elapsed
+    ):
+        cached_count = int(
+            db.get_setting("epg_channel_count", "0") or 0
+        )
+
+        print(
+            f"[epg] Up to date "
+            f"(built {int(time.time() - last_build)}s ago), "
+            f"rebuild skipped"
+        )
+
+        return cached_count
+
+    _build_t0 = time.time()
 
     # ----------------------------------------------------------------------
     # Download stale sources
@@ -1605,38 +1892,13 @@ def update_epg():
                 )
 
     # ----------------------------------------------------------------------
-    # Playlist
+    # Merge
     # ----------------------------------------------------------------------
-
-    playlist_path = os.environ.get(
-        "PLAYLIST_PATH",
-        "/playlist/rus_fixed.m3u",
-    )
-
-    channel_names = build_channel_set(
-        playlist_path
-    )
-
-    if not channel_names:
-        print(
-            "[epg] No channels in playlist"
-        )
-
-        write_epg_file(
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            '<tv/>'
-        )
-
-        return
 
     print(
         f"[epg] Merging EPG for "
         f"{len(channel_names)} playlist channels..."
     )
-
-    # ----------------------------------------------------------------------
-    # Merge
-    # ----------------------------------------------------------------------
 
     merged_count = merge_from_cache(
         epg_sources,
@@ -1654,7 +1916,22 @@ def update_epg():
         f"[epg] EPG saved to "
         f"{EPG_PATH} "
         f"({merged_count} channels, "
-        f"{final_size:,} bytes)"
+        f"{final_size:,} bytes) "
+        f"in {time.time() - _build_t0:.1f}s"
     )
+
+    try:
+        hwm_kb = next(
+            line.split()[1]
+            for line in open("/proc/self/status")
+            if line.startswith("VmHWM")
+        )
+        print(f"[epg] Peak RSS: {int(hwm_kb) / 1024:.0f} MB")
+    except Exception:
+        pass
+
+    db.set_setting("epg_last_build", int(time.time()))
+    db.set_setting("epg_playlist_hash", fingerprint)
+    db.set_setting("epg_channel_count", merged_count or 0)
 
     return merged_count

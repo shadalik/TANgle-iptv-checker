@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import json
+import os
 import re
 import time
 import requests
@@ -6,28 +8,14 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from concurrent.futures import ThreadPoolExecutor
 import database as db
+import groups as groups_module
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (X11; Linux) IPTV-Checker"}
 
-GROUPS_TRANSLATION = {
-    "Animation": "Мультфильмы", "Business": "Бизнес", "Classic": "Классика",
-    "Comedy": "Комедия", "Cooking": "Кухня", "Culture": "Культура",
-    "Documentary": "Документальное", "Education": "Образование",
-    "Entertainment": "Развлекательное", "Family": "Семейное", "General": "Общие",
-    "Kids": "Детские", "Lifestyle": "Стиль жизни", "Movies": "Кино",
-    "Music": "Музыка", "News": "Новости", "Outdoor": "Активный отдых",
-    "Religious": "Религия", "Science": "Наука", "Series": "Сериалы",
-    "Shop": "Магазин", "Sports": "Спорт", "Travel": "Путешествия",
-    "Weather": "Погода", "Undefined": "Другое", "Unknown": "Другое",
-}
-
 
 def translate_group(group_str):
-    if not group_str:
-        return "Другое"
-    parts = [p.strip() for p in group_str.split(";")]
-    translated = [GROUPS_TRANSLATION.get(p, p) for p in parts]
-    return translated[0]
+    # Совместимость: перевод EN-групп теперь в groups.translate_group.
+    return groups_module.translate_group(group_str)
 
 
 def clean_title(title):
@@ -109,6 +97,70 @@ def batch_update_channels(results):
         conn.close()
 
 
+def load_source_text(source):
+    """Текст плейлиста источника: локальный файл для source_type='file', иначе URL."""
+    if (source.get("source_type") or "url") == "file":
+        path = source.get("file_path") or ""
+        if not path or not os.path.exists(path):
+            raise FileNotFoundError(f"Файл источника не найден: {path}")
+        with open(path, "rb") as f:
+            raw = f.read()
+        for enc in ("utf-8-sig", "utf-8", "cp1251"):
+            try:
+                return raw.decode(enc)
+            except UnicodeDecodeError:
+                continue
+        return raw.decode("utf-8", errors="replace")
+    return fetch_source(source["url"])
+
+
+def import_source(source, text):
+    """Разобрать плейлист и записать каналы источника в БД.
+
+    Общая логика для проверки и для загрузки файла.
+    Возвращает число каналов в источнике.
+    """
+    channels = parse_m3u(text)
+    aliases = db.get_group_aliases()
+    overrides = db.get_group_overrides()
+    excluded = db.get_excluded_groups()
+    auto_synonyms = db.get_setting("auto_group_synonyms", "1") == "1"
+    rows = []
+    for ch in channels:
+        raw_translated = ch["group_title"]  # parse_m3u уже перевёл EN->RU
+        final_group = groups_module.canonicalize_import(
+            raw_translated, aliases, auto_synonyms=auto_synonyms)
+        norm = groups_module.norm_name(ch["name"])
+        if norm in overrides:
+            final_group = overrides[norm]
+        rows.append({
+            "name": ch["name"],
+            "url": ch["url"],
+            "inf_line": ch["inf_line"],
+            "group_title": final_group,
+            "source_group": raw_translated,
+        })
+    url_to_id = db.upsert_channels_bulk(source["id"], rows)
+    valid_urls = set(url_to_id.keys())
+    excluded_ids = [
+        url_to_id[r["url"]] for r in rows
+        if groups_module.mech_key(r["group_title"]) in excluded
+    ]
+    if excluded_ids:
+        # Новые каналы исключённых групп сразу выключаются,
+        # чтобы таблица каналов совпадала с правилом
+        db.set_channels_enabled(excluded_ids, False)
+        for mech, row in excluded.items():
+            try:
+                prev = set(json.loads(row.get("disabled_ids") or "[]"))
+            except Exception:
+                prev = set()
+            prev |= set(excluded_ids)
+            db.set_group_exclusion(mech, row.get("group_title") or mech, sorted(prev))
+    db.delete_stale_channels(source["id"], valid_urls)
+    return len(channels)
+
+
 def run_check(progress_callback=None):
     sources = db.get_sources(enabled_only=True)
     timeout = int(db.get_setting("check_timeout", "10"))
@@ -122,16 +174,11 @@ def run_check(progress_callback=None):
             progress_callback(i, len(sources), f"Source: {source['name']}")
         start = time.monotonic()
         try:
-            text = fetch_source(source["url"])
+            text = load_source_text(source)
+            count = import_source(source, text)
             elapsed = (time.monotonic() - start) * 1000
-            channels = parse_m3u(text)
-            valid_urls = set()
-            for ch in channels:
-                db.upsert_channel(source["id"], ch["name"], ch["url"], ch["inf_line"], ch["group_title"])
-                valid_urls.add(ch["url"])
-            db.delete_stale_channels(source["id"], valid_urls)
-            db.update_source_status(source["id"], True, len(channels), round(elapsed, 1))
-            print(f"[checker] Source {source['name']}: {len(channels)} channels, {round(elapsed)}ms")
+            db.update_source_status(source["id"], True, count, round(elapsed, 1))
+            print(f"[checker] Source {source['name']}: {count} channels, {round(elapsed)}ms")
         except Exception as e:
             elapsed = (time.monotonic() - start) * 1000
             db.update_source_status(source["id"], False, 0, round(elapsed, 1))
